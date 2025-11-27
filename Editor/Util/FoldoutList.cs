@@ -278,7 +278,7 @@
                 {
                     _defaultRemoveButton = new ButtonData(new Vector2(25f, 16f),
                         EditorGUIUtility.TrIconContent("Toolbar Minus", "Remove selection from the list"),
-                        false,
+                        true,
                         (rect, list) =>
                         {
                             if (list._list.onRemoveCallback == null)
