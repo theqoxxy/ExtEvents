@@ -5,7 +5,6 @@ namespace ExtEvents.Editor
     using SolidUtilities;
     using SolidUtilities.Editor;
     using SolidUtilities.UnityEditorInternals;
-    using TypeReferences;
     using UnityEditor;
     using UnityEngine;
     using UnityEngine.Assertions;
@@ -13,33 +12,32 @@ namespace ExtEvents.Editor
     [CustomPropertyDrawer(typeof(PersistentArgument))]
     public class PersistentArgumentDrawer : PropertyDrawer
     {
-        private static readonly Dictionary<(SerializedObject serializedObject, string propertyPath), SerializedProperty> _valuePropertyCache =
-                new Dictionary<(SerializedObject serializedObject, string propertyPath), SerializedProperty>();
+        private static readonly Dictionary<(SerializedObject serializedObject, string propertyPath), SerializedProperty> _valuePropertyCache = new();
 
         private SerializedProperty _valueProperty;
         private SerializedProperty _isSerialized;
-        private SerializedProperty _serializedArgProp;
-        private bool _showChoiceButton = true;
-
+        private bool _showChoiceButton;
         private GUIStyle _buttonStyle;
-        private GUIStyle ButtonStyle => _buttonStyle ?? (_buttonStyle = new GUIStyle(GUI.skin.button) { fontStyle = FontStyle.Bold, alignment = TextAnchor.LowerCenter});
 
-        private SerializedProperty ExposedProperty => _valueProperty;
+        private GUIStyle ButtonStyle => _buttonStyle ??= new GUIStyle(GUI.skin.button) 
+            { fontStyle = FontStyle.Bold, alignment = TextAnchor.LowerCenter };
 
-        private bool ShouldDrawFoldout =>
-            _isSerialized.boolValue && _valueProperty.propertyType == SerializedPropertyType.Generic;
+        private bool ShouldDrawFoldout => _isSerialized.boolValue && 
+            _valueProperty?.propertyType == SerializedPropertyType.Generic;
 
         public override float GetPropertyHeight(SerializedProperty property, GUIContent label)
         {
             FindProperties(property);
 
-            if (!_isSerialized.boolValue || ! property.isExpanded)
+            if (!_isSerialized.boolValue || !property.isExpanded)
                 return EditorGUIUtility.singleLineHeight;
 
-            // If a property has a custom property drawer, it will be drown inside a foldout anyway, so we account for
-            // it by adding a single line height.
-            float additionalHeight = ExposedProperty.HasCustomPropertyDrawer() ? EditorGUIUtility.singleLineHeight : 0f;
-            return EditorGUI.GetPropertyHeight(ExposedProperty, GUIContent.none) + additionalHeight;
+            if (_valueProperty?.isArray == true && _valueProperty.propertyType == SerializedPropertyType.Generic)
+            {
+                return CalculateArrayHeight(_valueProperty);
+            }
+
+            return CalculateGenericHeight();
         }
 
         public override void OnGUI(Rect fieldRect, SerializedProperty property, GUIContent label)
@@ -47,48 +45,63 @@ namespace ExtEvents.Editor
             FindProperties(property);
             _showChoiceButton = property.FindPropertyRelative(nameof(PersistentArgument._canBeDynamic)).boolValue;
 
-            (Rect labelRect, Rect buttonRect, Rect valueRect) = GetLabelButtonValueRects(fieldRect);
-
+            var (labelRect, buttonRect, valueRect) = GetLabelButtonValueRects(fieldRect);
             DrawLabel(property, fieldRect, labelRect, label);
 
-            // The indent level must be made 0 for the button and value to be displayed normally, without any
-            // additional indent. Otherwise, the button will not be clickable, and the value will look shifted
-            // compared to other fields.
-            int previousIndent = EditorGUI.indentLevel;
-            EditorGUI.indentLevel = 0;
+            using (new EditorIndentLevelScope(0))
+            {
+                if (_showChoiceButton)
+                    DrawChoiceButton(buttonRect, _isSerialized);
 
-            if (_showChoiceButton)
-                DrawChoiceButton(buttonRect, _isSerialized);
+                DrawValue(property, valueRect, fieldRect);
+            }
+        }
 
-            DrawValue(property, valueRect, fieldRect, previousIndent);
+        private float CalculateArrayHeight(SerializedProperty arrayProperty)
+        {
+            if (!arrayProperty.isExpanded)
+                return EditorGUIUtility.singleLineHeight;
 
-            EditorGUI.indentLevel = previousIndent;
+            float height = EditorGUIUtility.singleLineHeight * 2; // Foldout + size field
+            for (int i = 0; i < arrayProperty.arraySize; i++)
+            {
+                var element = arrayProperty.GetArrayElementAtIndex(i);
+                height += EditorGUI.GetPropertyHeight(element, true) + EditorPackageSettings.LinePadding;
+            }
+            return height;
+        }
+
+        private float CalculateGenericHeight()
+        {
+            float baseHeight = EditorGUI.GetPropertyHeight(_valueProperty, GUIContent.none);
+            return _valueProperty.HasCustomPropertyDrawer() ? baseHeight + EditorGUIUtility.singleLineHeight : baseHeight;
         }
 
         private static SerializedProperty GetValueProperty(SerializedProperty argumentProperty)
         {
-            var mainSerializedObject = argumentProperty.serializedObject;
-            var mainPropertyPath = argumentProperty.propertyPath;
+            var key = (argumentProperty.serializedObject, argumentProperty.propertyPath);
             var type = PersistentArgumentHelper.GetTypeFromProperty(argumentProperty, nameof(PersistentArgument._targetType));
             Assert.IsNotNull(type);
 
-            if (_valuePropertyCache.TryGetValue((mainSerializedObject, mainPropertyPath), out var valueProperty))
-            {
-                if (valueProperty.GetObjectType() == type)
-                    return valueProperty;
+            if (_valuePropertyCache.TryGetValue(key, out var valueProperty) && valueProperty.GetObjectType() == type)
+                return valueProperty;
 
-                _valuePropertyCache.Remove((mainSerializedObject, mainPropertyPath));
-                return GetValueProperty(argumentProperty);
-            }
+            _valuePropertyCache.Remove(key);
+            return CreateValueProperty(argumentProperty, type, key);
+        }
 
+        private static SerializedProperty CreateValueProperty(SerializedProperty argumentProperty, Type type, (SerializedObject, string) key)
+        {
             Type soType = ScriptableObjectCache.GetClass(type);
             var so = ScriptableObject.CreateInstance(soType);
             var serializedObject = new SerializedObject(so);
+            
             var soValueField = soType.GetField(nameof(DeserializedValueHolder<int>.Value));
             var value = argumentProperty.GetObject<PersistentArgument>().SerializedValue;
             soValueField.SetValue(so, value);
-            valueProperty = serializedObject.FindProperty(nameof(DeserializedValueHolder<int>.Value));
-            _valuePropertyCache.Add((mainSerializedObject, mainPropertyPath), valueProperty);
+            
+            var valueProperty = serializedObject.FindProperty(nameof(DeserializedValueHolder<int>.Value));
+            _valuePropertyCache.Add(key, valueProperty);
             return valueProperty;
         }
 
@@ -96,16 +109,17 @@ namespace ExtEvents.Editor
         {
             valueProperty.serializedObject.ApplyModifiedPropertiesWithoutUndo();
             LogHelper.RemoveLogEntriesByMode(LogModes.NoScriptAssetWarning);
+            
             var value = valueProperty.GetObject();
             var argument = argumentProperty.GetObject<PersistentArgument>();
             argument.SerializedValue = value;
         }
 
-        private void DrawValue(SerializedProperty property, Rect valueRect, Rect totalRect, int indentLevel)
+        private void DrawValue(SerializedProperty property, Rect valueRect, Rect totalRect)
         {
             if (_isSerialized.boolValue)
             {
-                DrawSerializedValue(property, valueRect, totalRect, indentLevel);
+                DrawSerializedValue(property, valueRect, totalRect);
             }
             else
             {
@@ -119,8 +133,11 @@ namespace ExtEvents.Editor
             var argNames = ExtEventDrawer.CurrentEventInfo.ArgNames;
             var currentArgName = argNames[indexProp.intValue];
 
-            // fallback field for backwards compatibility where _fromType didn't exist.
-            var matchingArgNames = GetMatchingArgNames(argNames, ExtEventDrawer.CurrentEventInfo.ParamTypes, PersistentArgumentHelper.GetTypeFromProperty(property, nameof(PersistentArgument._fromType), nameof(PersistentArgument._targetType)));
+            var matchingArgNames = GetMatchingArgNames(
+                argNames, 
+                ExtEventDrawer.CurrentEventInfo.ParamTypes, 
+                PersistentArgumentHelper.GetTypeFromProperty(property, nameof(PersistentArgument._fromType), nameof(PersistentArgument._targetType))
+            );
 
             using (new EditorGUI.DisabledGroupScope(matchingArgNames.Count == 1))
             {
@@ -150,31 +167,29 @@ namespace ExtEvents.Editor
         private void ShowArgNameDropdown(List<(string name, int index)> argNames, SerializedProperty indexProp)
         {
             var menu = new GenericMenu();
-
-            foreach ((string name, int index) in argNames)
+            foreach (var (name, index) in argNames)
             {
-                menu.AddItem(new GUIContent(name), indexProp.intValue == index, i =>
-                {
-                    indexProp.intValue = (int) i;
-                    indexProp.serializedObject.ApplyModifiedProperties();
-                }, index);
+                menu.AddItem(new GUIContent(name), indexProp.intValue == index, 
+                    i => SetArgumentIndex(indexProp, (int)i), index);
             }
-
             menu.ShowAsContext();
         }
 
-        private void DrawSerializedValue(SerializedProperty property, Rect valueRect, Rect totalRect, int indentLevel)
+        private static void SetArgumentIndex(SerializedProperty indexProp, int index)
         {
-            // When the value mode is changed from dynamic to serialized, FindProperties hasn't executed yet and _valueProperty is null until the next frame.
-            if (_valueProperty == null)
-            {
-                return;
-            }
+            indexProp.intValue = index;
+            indexProp.serializedObject.ApplyModifiedProperties();
+        }
+
+        private void DrawSerializedValue(SerializedProperty property, Rect valueRect, Rect totalRect)
+        {
+            if (_valueProperty == null) return;
 
             _valueProperty.serializedObject.Update();
-
             EditorGUI.BeginChangeCheck();
-            DrawValueProperty(property, valueRect, totalRect, indentLevel);
+            
+            DrawValueProperty(property, valueRect, totalRect);
+            
             if (EditorGUI.EndChangeCheck())
             {
                 SaveValueProperty(property, _valueProperty);
@@ -184,20 +199,18 @@ namespace ExtEvents.Editor
         private void FindProperties(SerializedProperty property)
         {
             _isSerialized = property.FindPropertyRelative(nameof(PersistentArgument._isSerialized));
-
-            if (_isSerialized.boolValue)
-                _valueProperty = GetValueProperty(property);
+            _valueProperty = _isSerialized.boolValue ? GetValueProperty(property) : null;
         }
 
-        private void DrawValueProperty(SerializedProperty mainProperty, Rect valueRect, Rect totalRect, int indentLevel)
+        private void DrawValueProperty(SerializedProperty mainProperty, Rect valueRect, Rect totalRect)
         {
-            if (ExposedProperty.propertyType == SerializedPropertyType.Generic)
+            if (_valueProperty.propertyType == SerializedPropertyType.Generic)
             {
-                DrawValueInFoldout(mainProperty, ExposedProperty, totalRect, indentLevel);
+                DrawValueInFoldout(mainProperty, _valueProperty, totalRect);
             }
             else
             {
-                EditorGUI.PropertyField(valueRect, ExposedProperty, GUIContent.none);
+                EditorGUI.PropertyField(valueRect, _valueProperty, GUIContent.none);
             }
         }
 
@@ -217,49 +230,75 @@ namespace ExtEvents.Editor
         {
             const float indentWidth = 15f;
             const float valueLeftIndent = 2f;
+            const float choiceButtonWidth = 19f;
 
             totalRect.height = EditorGUIUtility.singleLineHeight;
+            totalRect.xMin += EditorGUI.indentLevel * indentWidth;
 
             (Rect labelAndButtonRect, Rect valueRect) = totalRect.CutVertically(EditorGUIUtility.labelWidth);
-
-            labelAndButtonRect.xMin += EditorGUI.indentLevel * indentWidth;
-
-            const float choiceButtonWidth = 19f;
             (Rect labelRect, Rect buttonRect) = labelAndButtonRect.CutVertically(_showChoiceButton ? choiceButtonWidth : 0f, fromRightSide: true);
 
             valueRect.xMin += valueLeftIndent;
             return (labelRect, buttonRect, valueRect);
         }
 
-        private static void DrawValueInFoldout(SerializedProperty mainProperty, SerializedProperty valueProperty, Rect totalRect, int indentLevel)
+        private static void DrawValueInFoldout(SerializedProperty mainProperty, SerializedProperty valueProperty, Rect totalRect)
         {
             valueProperty.isExpanded = mainProperty.isExpanded;
+            if (!mainProperty.isExpanded) return;
 
-            if ( ! mainProperty.isExpanded)
-                return;
+            var shiftedRect = totalRect.ShiftOneLineDown(EditorGUI.indentLevel + 1);
 
-            var shiftedRect = totalRect.ShiftOneLineDown(indentLevel + 1);
-
-            if (valueProperty.HasCustomPropertyDrawer())
+            if (valueProperty.isArray && valueProperty.propertyType == SerializedPropertyType.Generic)
+            {
+                DrawArrayProperty(shiftedRect, valueProperty);
+            }
+            else if (valueProperty.HasCustomPropertyDrawer())
             {
                 shiftedRect.height = EditorGUI.GetPropertyHeight(valueProperty);
                 EditorGUI.PropertyField(shiftedRect, valueProperty, GUIContent.none);
-                return;
             }
-
-            // This draws all child fields of the _constantValue property with indent.
-            SerializedProperty iterator = valueProperty.Copy();
-            var nextProp = valueProperty.Copy();
-            nextProp.NextVisible(false);
-            bool enterChildren = true;
-
-            while (iterator.NextVisible(enterChildren) && ! SerializedProperty.EqualContents(iterator, nextProp))
+            else
             {
-                // enter children only once.
+                DrawGenericPropertyFields(valueProperty, ref shiftedRect);
+            }
+        }
+
+        private static void DrawGenericPropertyFields(SerializedProperty property, ref Rect position)
+        {
+            SerializedProperty iterator = property.Copy();
+            var nextProp = property.Copy();
+            nextProp.NextVisible(false);
+            
+            bool enterChildren = true;
+            while (iterator.NextVisible(enterChildren) && !SerializedProperty.EqualContents(iterator, nextProp))
+            {
                 enterChildren = false;
-                shiftedRect.height = EditorGUI.GetPropertyHeight(iterator, true);
-                EditorGUI.PropertyField(shiftedRect, iterator, true);
-                shiftedRect = shiftedRect.ShiftOneLineDown(lineHeight: shiftedRect.height);
+                position.height = EditorGUI.GetPropertyHeight(iterator, true);
+                EditorGUI.PropertyField(position, iterator, true);
+                position = position.ShiftOneLineDown(lineHeight: position.height);
+            }
+        }
+
+        private static void DrawArrayProperty(Rect position, SerializedProperty arrayProperty)
+        {
+            var sizeRect = new Rect(position) { height = EditorGUIUtility.singleLineHeight };
+            EditorGUI.PropertyField(sizeRect, arrayProperty.FindPropertyRelative("Array.size"));
+
+            if (!arrayProperty.isExpanded) return;
+
+            var elementRect = new Rect(position)
+            {
+                y = position.y + EditorGUIUtility.singleLineHeight + EditorPackageSettings.LinePadding,
+                height = EditorGUIUtility.singleLineHeight
+            };
+
+            for (int i = 0; i < arrayProperty.arraySize; i++)
+            {
+                var element = arrayProperty.GetArrayElementAtIndex(i);
+                elementRect.height = EditorGUI.GetPropertyHeight(element, true);
+                EditorGUI.PropertyField(elementRect, element, true);
+                elementRect.y += elementRect.height + EditorPackageSettings.LinePadding;
             }
         }
 
@@ -269,6 +308,19 @@ namespace ExtEvents.Editor
             {
                 isSerializedProperty.boolValue = !isSerializedProperty.boolValue;
             }
+        }
+
+        private sealed class EditorIndentLevelScope : IDisposable
+        {
+            private readonly int _previousIndent;
+            
+            public EditorIndentLevelScope(int indentLevel)
+            {
+                _previousIndent = EditorGUI.indentLevel;
+                EditorGUI.indentLevel = indentLevel;
+            }
+            
+            public void Dispose() => EditorGUI.indentLevel = _previousIndent;
         }
     }
 }
