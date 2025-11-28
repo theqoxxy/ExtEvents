@@ -22,7 +22,7 @@
 
             var eventObject = PropertyObjectCache.GetObject<BaseExtEvent>(extEventProperty);
 
-            if (eventObject._dynamicListeners == null)
+            if (eventObject?._dynamicListeners == null)
                 return 0f;
 
             return (EditorGUIUtility.singleLineHeight + EditorPackageSettings.LinePadding) * (extEventProperty.isExpanded ? eventObject._dynamicListeners.GetInvocationList().Length : 0);
