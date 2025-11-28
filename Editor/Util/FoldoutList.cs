@@ -283,7 +283,8 @@
                         {
                             if (list._list.onRemoveCallback == null)
                             {
-                                ReorderableList.defaultBehaviours.DoRemoveButton(list._list);
+                                if (list._list.index >= 0 && list._list.index < list._list.count)
+                                    ReorderableList.defaultBehaviours.DoRemoveButton(list._list);
                             }
                             else
                             {
