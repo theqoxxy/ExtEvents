@@ -295,7 +295,19 @@
             // Cannot rely on ExtEventPropertyDrawer.CurrentExtEvent because the initialization of argument property occurs
             // not in the middle of drawing ext events but rather after drawing all the events.
             // argument => arguments array => listener => listeners array => ext event.
-            var extEventInfo = ExtEventDrawer.GetExtEventInfo(argumentProp.GetParent().GetParent().GetParent().GetParent());
+            var parent = argumentProp.GetParent();
+            if (parent == null)
+                return;
+            
+            var grandParent = parent.GetParent();
+            if (grandParent == null)
+                return;
+            
+            var greatGrandParent = grandParent.GetParent();
+            if (greatGrandParent == null)
+                return;
+            
+            var extEventInfo = ExtEventDrawer.GetExtEventInfo(greatGrandParent.GetParent());
 
             int matchingParamIndex = -1;
             bool exactMatch = false;
