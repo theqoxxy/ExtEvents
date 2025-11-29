@@ -135,7 +135,7 @@ namespace ExtEvents.Editor
 
             var matchingArgNames = GetMatchingArgNames(
                 argNames, 
-                ExtEventDrawer.CurrentEventInfo.ParamTypes, 
+                ExtEventDrawer.CurrentEventInfo?.ParamTypes ?? Type.EmptyTypes,
                 PersistentArgumentHelper.GetTypeFromProperty(property, nameof(PersistentArgument._fromType), nameof(PersistentArgument._targetType))
             );
 
