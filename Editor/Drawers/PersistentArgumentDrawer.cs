@@ -131,7 +131,7 @@ namespace ExtEvents.Editor
         {
             var indexProp = property.FindPropertyRelative(nameof(PersistentArgument._index));
             var argNames = ExtEventDrawer.CurrentEventInfo?.ArgNames ?? Array.Empty<string>();
-            var currentArgName = argNames[indexProp.intValue];
+            var currentArgName = indexProp.intValue < argNames.Length ? argNames[indexProp.intValue] : "Invalid Index";
 
             var matchingArgNames = GetMatchingArgNames(
                 argNames, 
