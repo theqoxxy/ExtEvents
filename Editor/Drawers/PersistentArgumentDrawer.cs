@@ -130,7 +130,7 @@ namespace ExtEvents.Editor
         private void DrawDynamicValue(SerializedProperty property, Rect valueRect)
         {
             var indexProp = property.FindPropertyRelative(nameof(PersistentArgument._index));
-            var argNames = ExtEventDrawer.CurrentEventInfo.ArgNames;
+            var argNames = ExtEventDrawer.CurrentEventInfo?.ArgNames ?? Array.Empty<string>();
             var currentArgName = argNames[indexProp.intValue];
 
             var matchingArgNames = GetMatchingArgNames(
