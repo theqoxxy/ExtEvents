@@ -129,7 +129,7 @@
 
             var menuItems = new List<DropdownItem<MethodInfo>>();
 
-            var paramTypes = ExtEventDrawer.CurrentEventInfo.ParamTypes;
+            var paramTypes = ExtEventDrawer.CurrentEventInfo?.ParamTypes ?? Type.EmptyTypes;
 
             if (isInstance)
                 menuItems.AddRange(FindInstanceMethods(declaringType, paramTypes));
