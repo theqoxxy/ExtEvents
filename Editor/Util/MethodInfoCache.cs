@@ -36,5 +36,19 @@
                 return item;
             }
         }
+
+        private static bool ParametersMatch(ParameterInfo[] parameters, Type[] argTypes)
+        {
+            if (parameters.Length != argTypes.Length)
+                return false;
+
+            for (int i = 0; i < parameters.Length; i++)
+            {
+                if (parameters[i].ParameterType != argTypes[i])
+                    return false;
+            }
+
+            return true;
+        }
     }
 }
