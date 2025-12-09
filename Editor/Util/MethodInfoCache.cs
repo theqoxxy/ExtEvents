@@ -2,6 +2,7 @@
 {
     using System;
     using System.Collections.Generic;
+    using System.Linq;
     using System.Reflection;
     using JetBrains.Annotations;
     using UnityEngine;
@@ -16,9 +17,24 @@
                 return value;
 
             var flags = BindingFlags.Public | BindingFlags.NonPublic | (isStatic ? BindingFlags.Static : BindingFlags.Instance | BindingFlags.Static);
-            var item = type.GetMethod(methodName, flags, null, CallingConventions.Any, argTypes, null); // TODO: check if we need callingconventions.any
-            _cache.Add((type, methodName, argTypes), item);
-            return item;
+
+            try
+            {
+                var item = type.GetMethod(methodName, flags, null, CallingConventions.Any, argTypes, null);
+                _cache.Add((type, methodName, argTypes), item);
+                return item;
+            }
+            catch (AmbiguousMatchException)
+            {
+                var methods = type.GetMethods(flags)
+                    .Where(m => m.Name == methodName)
+                    .Where(m => ParametersMatch(m.GetParameters(), argTypes))
+                    .ToArray();
+
+                var item = methods.FirstOrDefault();
+                _cache.Add((type, methodName, argTypes), item);
+                return item;
+            }
         }
     }
 }
