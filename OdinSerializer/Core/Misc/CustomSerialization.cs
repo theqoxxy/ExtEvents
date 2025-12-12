@@ -218,7 +218,7 @@
 
             resolver.Value.SetReferencedUnityObjects(data.ReferencedUnityObjects);
             context.IndexReferenceResolver = resolver.Value;
-            reader.Nodes = data.SerializationNodes;
+            reader.Nodes = data.SerializationNodes ?? new List<SerializationNode>();
             return SerializationUtility.DeserializeValue(valueType, reader);
         }
 
