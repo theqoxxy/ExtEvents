@@ -264,8 +264,8 @@
             if (previousMethod == newMethod)
                 return;
 
-            var methodNameProp = listenerProperty.FindPropertyRelative(nameof(PersistentListener._methodName));
-            var serializedArgsProp = listenerProperty.FindPropertyRelative(nameof(PersistentListener._persistentArguments));
+            var methodNameProp = listenerProperty.Copy().FindPropertyRelative(nameof(PersistentListener._methodName));
+            var serializedArgsProp = listenerProperty.Copy().FindPropertyRelative(nameof(PersistentListener._persistentArguments));
 
             methodNameProp.stringValue = newMethod.Name;
             var parameters = newMethod.GetParameters();
