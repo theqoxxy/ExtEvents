@@ -190,23 +190,26 @@ namespace ExtEvents
 
         private void EnsureArgumentHolderInitialized()
         {
-#if UNITY_EDITOR
+        #if UNITY_EDITOR
             // old code support
             if (DeserializeOldArgumentHolder())
                 return;
-
+        
             Assert.IsNotNull(_argumentHolder);
-#else
-            if (_argumentHolder == null)
+        #else
+            if (_argumentHolder == null && _targetType?.Type != null)
             {
                 _argumentHolder = CreateArgumentHolder(_targetType);
                 _argumentHolder.Value = CustomSerialization.DeserializeValue(_targetType, _serializationData);
             }
-#endif
+        #endif
         }
 
         private ArgumentHolder CreateArgumentHolder(Type valueType, object value = null)
         {
+            if (valueType == null)
+                return null;
+                
             var holderType = typeof(ArgumentHolder<>).MakeGenericType(valueType);
             return (ArgumentHolder) (value == null ? Activator.CreateInstance(holderType) : Activator.CreateInstance(holderType, value));
         }
