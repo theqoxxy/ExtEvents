@@ -192,9 +192,8 @@ namespace ExtEvents
         {
         #if UNITY_EDITOR
             // old code support
-            if (DeserializeOldArgumentHolder())
-                return;
-        
+            DeserializeOldArgumentHolder();
+            
             Assert.IsNotNull(_argumentHolder);
         #else
             if (_argumentHolder == null && _targetType?.Type != null)
@@ -216,13 +215,15 @@ namespace ExtEvents
 
         private bool DeserializeOldArgumentHolder()
         {
-            if (_argumentHolder != null || string.IsNullOrEmpty(_serializedArg))
-                return false;
-
-            var type = typeof(ArgumentHolder<>).MakeGenericType(_targetType);
-            _argumentHolder = (ArgumentHolder) JsonUtility.FromJson(_serializedArg, type);
-            _serializedArg = null;
-            return true;
+            if (!string.IsNullOrEmpty(_serializedArg) && _targetType?.Type != null)
+            {
+                var type = typeof(ArgumentHolder<>).MakeGenericType(_targetType);
+                _argumentHolder = (ArgumentHolder) JsonUtility.FromJson(_serializedArg, type);
+                _serializedArg = null;
+                return true;
+            }
+            
+            return false;
         }
     }
 }
