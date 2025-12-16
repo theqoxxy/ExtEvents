@@ -1,4 +1,4 @@
-﻿namespace ExtEvents
+namespace ExtEvents
 {
     using System;
     using System.Collections.Generic;
@@ -51,14 +51,8 @@
         {
             if (!MethodIsEligible(persistentListener.MethodInfo, EventParamTypes, true, true))
                 throw new MethodNotEligibleException("The method of persistent listener is not eligible for adding to this event");
-        
+
             CheckArguments(persistentListener.MethodInfo, ref persistentListener._persistentArguments, EventParamTypes);
-            
-            if (persistentListener._initializationComplete)
-            {
-                persistentListener.Reinitialize();
-            }
-            
             ArrayHelper.Add(ref _persistentListeners, persistentListener);
         }
 
