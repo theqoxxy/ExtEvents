@@ -252,6 +252,17 @@
             return true;
         }
 
+        [PublicAPI]
+        public void Reinitialize()
+        {
+            _initializationComplete = false;
+            _initializationSuccessful = false;
+            _invokableCall = null;
+            _arguments = null;
+            
+            Initialize();
+        }
+
         private Type GetDeclaringType()
         {
             if (_isStatic)
