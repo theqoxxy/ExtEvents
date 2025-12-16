@@ -113,6 +113,7 @@ namespace ExtEvents.Editor
             var value = valueProperty.GetObject();
             var argument = argumentProperty.GetObject<PersistentArgument>();
             argument.SerializedValue = value;
+            EditorUtility.SetDirty(argumentProperty.serializedObject.targetObject);
         }
 
         private void DrawValue(SerializedProperty property, Rect valueRect, Rect totalRect)
