@@ -1,4 +1,4 @@
-﻿namespace ExtEvents
+namespace ExtEvents
 {
     using System;
     using System.Collections.Generic;
@@ -250,17 +250,6 @@
 
             _initializationComplete = true;
             return true;
-        }
-
-        [PublicAPI]
-        public void Reinitialize()
-        {
-            _initializationComplete = false;
-            _initializationSuccessful = false;
-            _invokableCall = null;
-            _arguments = null;
-            
-            Initialize();
         }
 
         private Type GetDeclaringType()
