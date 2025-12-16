@@ -190,40 +190,36 @@ namespace ExtEvents
 
         private void EnsureArgumentHolderInitialized()
         {
-        #if UNITY_EDITOR
+#if UNITY_EDITOR
             // old code support
-            DeserializeOldArgumentHolder();
-            
+            if (DeserializeOldArgumentHolder())
+                return;
+
             Assert.IsNotNull(_argumentHolder);
-        #else
-            if (_argumentHolder == null && _targetType?.Type != null)
+#else
+            if (_argumentHolder == null)
             {
                 _argumentHolder = CreateArgumentHolder(_targetType);
                 _argumentHolder.Value = CustomSerialization.DeserializeValue(_targetType, _serializationData);
             }
-        #endif
+#endif
         }
 
         private ArgumentHolder CreateArgumentHolder(Type valueType, object value = null)
         {
-            if (valueType == null)
-                return null;
-                
             var holderType = typeof(ArgumentHolder<>).MakeGenericType(valueType);
             return (ArgumentHolder) (value == null ? Activator.CreateInstance(holderType) : Activator.CreateInstance(holderType, value));
         }
 
         private bool DeserializeOldArgumentHolder()
         {
-            if (!string.IsNullOrEmpty(_serializedArg) && _targetType?.Type != null)
-            {
-                var type = typeof(ArgumentHolder<>).MakeGenericType(_targetType);
-                _argumentHolder = (ArgumentHolder) JsonUtility.FromJson(_serializedArg, type);
-                _serializedArg = null;
-                return true;
-            }
-            
-            return false;
+            if (_argumentHolder != null || string.IsNullOrEmpty(_serializedArg))
+                return false;
+
+            var type = typeof(ArgumentHolder<>).MakeGenericType(_targetType);
+            _argumentHolder = (ArgumentHolder) JsonUtility.FromJson(_serializedArg, type);
+            _serializedArg = null;
+            return true;
         }
     }
 }
