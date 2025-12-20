@@ -1,4 +1,4 @@
-﻿namespace ExtEvents
+namespace ExtEvents
 {
     using System;
     using JetBrains.Annotations;
@@ -33,12 +33,18 @@
             DynamicListeners?.Invoke();
         }
 
+        [PublicAPI]
+        public void AddListener(Action listener) => DynamicListeners += listener;
+
+        [PublicAPI]
+        public void RemoveListener(Action listener) => DynamicListeners -= listener;
+
         public static ExtEvent operator +(ExtEvent extEvent, Action listener)
         {
             if (extEvent == null)
                 return null;
 
-            extEvent.DynamicListeners += listener;
+            extEvent.AddListener(listener);
             return extEvent;
         }
 
@@ -47,7 +53,7 @@
             if (extEvent == null)
                 return null;
 
-            extEvent.DynamicListeners -= listener;
+            extEvent.RemoveListener(listener);
             return extEvent;
         }
     }
