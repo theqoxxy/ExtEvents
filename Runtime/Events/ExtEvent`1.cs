@@ -40,12 +40,18 @@
             DynamicListeners?.Invoke(arg);
         }
 
+        [PublicAPI]
+        public void AddListener(Action<T> listener) => DynamicListeners += listener;
+
+        [PublicAPI]
+        public void RemoveListener(Action<T> listener) => DynamicListeners -= listener;
+
         public static ExtEvent<T> operator +(ExtEvent<T> extEvent, Action<T> listener)
         {
             if (extEvent == null)
                 return null;
 
-            extEvent.DynamicListeners += listener;
+            extEvent.AddListener(listener);
             return extEvent;
         }
 
@@ -54,7 +60,7 @@
             if (extEvent == null)
                 return null;
 
-            extEvent.DynamicListeners -= listener;
+            extEvent.RemoveListener(listener);
             return extEvent;
         }
     }
