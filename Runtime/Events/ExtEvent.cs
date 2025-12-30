@@ -39,6 +39,9 @@ namespace ExtEvents
         [PublicAPI]
         public void RemoveListener(Action listener) => DynamicListeners -= listener;
 
+        [PublicAPI]
+        public void RemoveAllListeners() => DynamicListeners = null;
+
         public static ExtEvent operator +(ExtEvent extEvent, Action listener)
         {
             if (extEvent == null)
