@@ -46,6 +46,9 @@
         [PublicAPI]
         public void RemoveListener(Action<T> listener) => DynamicListeners -= listener;
 
+        [PublicAPI]
+        public void RemoveAllListeners() => DynamicListeners = null;
+
         public static ExtEvent<T> operator +(ExtEvent<T> extEvent, Action<T> listener)
         {
             if (extEvent == null)
