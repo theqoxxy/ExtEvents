@@ -71,8 +71,6 @@ namespace ExtEvents
         [PublicAPI]
         public bool RemovePersistentListener(PersistentListener listener) => ArrayHelper.Remove(ref _persistentListeners, listener);
 
-        #region Verify Persistent Argument
-
         private static void CheckArguments(MethodInfo method, ref PersistentArgument[] arguments, Type[] eventParamTypes)
         {
             var parameters = method.GetParameters();
@@ -131,10 +129,6 @@ namespace ExtEvents
             return foundIndices;
         }
 
-        #endregion
-
-        #region MethodIsEligible
-
         /// <summary>
         /// Check if the method is eligible for adding as a persistent listener to <see cref="ExtEvent"/>.
         /// </summary>
@@ -190,8 +184,6 @@ namespace ExtEvents
         {
             return eventParamTypes.Any(eventParamType => eventParamType.IsAssignableFrom(argType) || Converter.ExistsForTypes(eventParamType, argType));
         }
-
-        #endregion
     }
 
     public class MethodNotEligibleException : ArgumentException
