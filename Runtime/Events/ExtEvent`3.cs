@@ -4,48 +4,45 @@ namespace ExtEvents
     using JetBrains.Annotations;
 
     [Serializable]
-    public class ExtEvent<T1, T2, T3> : ExtEventBase<Action<T1, T2, T3>>
+    public class ExtEvent<T1, T2, T3> : ExtEventBase<Action<T1, T2, T3>, T1, T2, T3>
     {
-        private readonly unsafe void*[] _arguments = new void*[3];
-        protected override unsafe void*[] Arguments => _arguments;
+        protected override Type[] GetEventParamTypes() => new Type[] { typeof(T1), typeof(T2), typeof(T3) };
 
-        private Type[] _eventParamTypes;
-        protected override Type[] EventParamTypes => _eventParamTypes ??= new Type[] { typeof(T1), typeof(T2), typeof(T3) };
-
+        /// <summary>
+        /// Invokes all listeners of the event.
+        /// </summary>
         [PublicAPI]
-        public event Action<T1, T2, T3> DynamicListeners;
-        
-        protected override Action<T1, T2, T3> DynamicListenersField
+        public void Invoke(T1 arg1, T2 arg2, T3 arg3) => InvokeWithArguments(arg1, arg2, arg3);
+
+        protected override void InvokeDynamicListeners()
         {
-            get => DynamicListeners;
-            set => DynamicListeners = value;
+            throw new InvalidOperationException("Parameterless Invoke() is not supported for ExtEvent<T1, T2, T3>");
         }
 
-        protected override void PrepareArguments(params object[] args)
+        protected override void InvokeDynamicListenersWithArguments<TArg1, TArg2, TArg3>(TArg1 arg1, TArg2 arg2, TArg3 arg3)
         {
-            if (args.Length != 3 || args[0] is not T1 || args[1] is not T2 || args[2] is not T3)
-                throw new ArgumentException($"Expected 3 arguments of types {typeof(T1).Name}, {typeof(T2).Name}, {typeof(T3).Name}");
-            
-            unsafe
+            if (arg1 is T1 typedArg1 && arg2 is T2 typedArg2 && arg3 is T3 typedArg3)
             {
-                T1 arg1 = (T1)args[0];
-                T2 arg2 = (T2)args[1];
-                T3 arg3 = (T3)args[2];
-                _arguments[0] = UnsafeHelper.AsPointer(ref arg1);
-                _arguments[1] = UnsafeHelper.AsPointer(ref arg2);
-                _arguments[2] = UnsafeHelper.AsPointer(ref arg3);
+                DynamicListeners?.Invoke(typedArg1, typedArg2, typedArg3);
             }
         }
 
-        protected override void InvokeDynamicListeners(params object[] args)
+        public static ExtEvent<T1, T2, T3> operator +(ExtEvent<T1, T2, T3> extEvent, Action<T1, T2, T3> listener)
         {
-            if (args.Length != 3 || args[0] is not T1 || args[1] is not T2 || args[2] is not T3)
-                throw new ArgumentException($"Expected 3 arguments of types {typeof(T1).Name}, {typeof(T2).Name}, {typeof(T3).Name}");
-            
-            DynamicListeners?.Invoke((T1)args[0], (T2)args[1], (T3)args[2]);
+            if (extEvent == null)
+                return null;
+
+            extEvent.AddListener(listener);
+            return extEvent;
         }
 
-        [PublicAPI]
-        public void Invoke(T1 arg1, T2 arg2, T3 arg3) => InvokeInternal(arg1, arg2, arg3);
+        public static ExtEvent<T1, T2, T3> operator -(ExtEvent<T1, T2, T3> extEvent, Action<T1, T2, T3> listener)
+        {
+            if (extEvent == null)
+                return null;
+
+            extEvent.RemoveListener(listener);
+            return extEvent;
+        }
     }
 }

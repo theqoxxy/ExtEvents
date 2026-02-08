@@ -6,37 +6,34 @@ namespace ExtEvents
     [Serializable]
     public class ExtEvent : ExtEventBase<Action>
     {
-        protected override Type[] EventParamTypes => Type.EmptyTypes;
-        
-        protected override unsafe void*[] Arguments => null;
+        protected override Type[] GetEventParamTypes() => Type.EmptyTypes;
 
-        [PublicAPI]
-        public event Action DynamicListeners;
-        
-        protected override Action DynamicListenersField
+        protected override void InvokeDynamicListeners()
         {
-            get => DynamicListeners;
-            set => DynamicListeners = value;
-        }
-
-        protected override void PrepareArguments(params object[] args)
-        {
-            if (args.Length != 0)
-                throw new ArgumentException("ExtEvent without parameters expects no arguments");
-        }
-
-        protected override void InvokeDynamicListeners(params object[] args)
-        {
-            if (args.Length != 0)
-                throw new ArgumentException("ExtEvent without parameters expects no arguments");
-            
             DynamicListeners?.Invoke();
         }
 
-        /// <summary>
-        /// Invokes all listeners of the event.
-        /// </summary>
-        [PublicAPI]
-        public void Invoke() => InvokeInternal();
+        protected override unsafe void PrepareArguments(void*[] arguments)
+        {
+            // No arguments for parameterless event
+        }
+
+        public static ExtEvent operator +(ExtEvent extEvent, Action listener)
+        {
+            if (extEvent == null)
+                return null;
+
+            extEvent.AddListener(listener);
+            return extEvent;
+        }
+
+        public static ExtEvent operator -(ExtEvent extEvent, Action listener)
+        {
+            if (extEvent == null)
+                return null;
+
+            extEvent.RemoveListener(listener);
+            return extEvent;
+        }
     }
 }

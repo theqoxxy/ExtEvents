@@ -4,46 +4,45 @@ namespace ExtEvents
     using JetBrains.Annotations;
 
     [Serializable]
-    public class ExtEvent<T1, T2> : ExtEventBase<Action<T1, T2>>
+    public class ExtEvent<T1, T2> : ExtEventBase<Action<T1, T2>, T1, T2>
     {
-        private readonly unsafe void*[] _arguments = new void*[2];
-        protected override unsafe void*[] Arguments => _arguments;
+        protected override Type[] GetEventParamTypes() => new Type[] { typeof(T1), typeof(T2) };
 
-        private Type[] _eventParamTypes;
-        protected override Type[] EventParamTypes => _eventParamTypes ??= new Type[] { typeof(T1), typeof(T2) };
-
+        /// <summary>
+        /// Invokes all listeners of the event.
+        /// </summary>
         [PublicAPI]
-        public event Action<T1, T2> DynamicListeners;
-        
-        protected override Action<T1, T2> DynamicListenersField
+        public void Invoke(T1 arg1, T2 arg2) => InvokeWithArguments(arg1, arg2);
+
+        protected override void InvokeDynamicListeners()
         {
-            get => DynamicListeners;
-            set => DynamicListeners = value;
+            throw new InvalidOperationException("Parameterless Invoke() is not supported for ExtEvent<T1, T2>");
         }
 
-        protected override void PrepareArguments(params object[] args)
+        protected override void InvokeDynamicListenersWithArguments<TArg1, TArg2>(TArg1 arg1, TArg2 arg2)
         {
-            if (args.Length != 2 || args[0] is not T1 || args[1] is not T2)
-                throw new ArgumentException($"Expected 2 arguments of types {typeof(T1).Name}, {typeof(T2).Name}");
-            
-            unsafe
+            if (arg1 is T1 typedArg1 && arg2 is T2 typedArg2)
             {
-                T1 arg1 = (T1)args[0];
-                T2 arg2 = (T2)args[1];
-                _arguments[0] = UnsafeHelper.AsPointer(ref arg1);
-                _arguments[1] = UnsafeHelper.AsPointer(ref arg2);
+                DynamicListeners?.Invoke(typedArg1, typedArg2);
             }
         }
 
-        protected override void InvokeDynamicListeners(params object[] args)
+        public static ExtEvent<T1, T2> operator +(ExtEvent<T1, T2> extEvent, Action<T1, T2> listener)
         {
-            if (args.Length != 2 || args[0] is not T1 || args[1] is not T2)
-                throw new ArgumentException($"Expected 2 arguments of types {typeof(T1).Name}, {typeof(T2).Name}");
-            
-            DynamicListeners?.Invoke((T1)args[0], (T2)args[1]);
+            if (extEvent == null)
+                return null;
+
+            extEvent.AddListener(listener);
+            return extEvent;
         }
 
-        [PublicAPI]
-        public void Invoke(T1 arg1, T2 arg2) => InvokeInternal(arg1, arg2);
+        public static ExtEvent<T1, T2> operator -(ExtEvent<T1, T2> extEvent, Action<T1, T2> listener)
+        {
+            if (extEvent == null)
+                return null;
+
+            extEvent.RemoveListener(listener);
+            return extEvent;
+        }
     }
 }
