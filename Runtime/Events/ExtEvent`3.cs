@@ -32,7 +32,7 @@ namespace ExtEvents
             if (extEvent == null)
                 return null;
 
-            extEvent.AddListener(listener);
+            extEvent.AddDynamicListener(listener);
             return extEvent;
         }
 
@@ -41,7 +41,7 @@ namespace ExtEvents
             if (extEvent == null)
                 return null;
 
-            extEvent.RemoveListener(listener);
+            extEvent.RemoveDynamicListener(listener);
             return extEvent;
         }
     }
