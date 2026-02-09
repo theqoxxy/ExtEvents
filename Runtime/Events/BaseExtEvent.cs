@@ -7,6 +7,7 @@ namespace ExtEvents
     using JetBrains.Annotations;
     using SolidUtilities;
     using UnityEngine;
+    using Object = UnityEngine.Object;
 
     /// <summary>
     /// An event whose listeners can be configured through editor UI.
@@ -70,6 +71,101 @@ namespace ExtEvents
         /// <returns>Whether the listener was found in the list.</returns>
         [PublicAPI]
         public bool RemovePersistentListener(PersistentListener listener) => ArrayHelper.Remove(ref _persistentListeners, listener);
+
+        /// <summary>
+        /// Removes all persistent listeners that invoke the specified method through a delegate.
+        /// </summary>
+        /// <typeparam name="T">Type of the delegate that references the method to remove.</typeparam>
+        /// <param name="methodDelegate">Delegate that references the method to remove.</param>
+        /// <returns>The number of listeners removed.</returns>
+        [PublicAPI]
+        public int RemovePersistentListener<T>(T methodDelegate) where T : Delegate
+        {
+            if (methodDelegate == null)
+                throw new ArgumentNullException(nameof(methodDelegate));
+
+            return RemovePersistentListener(methodDelegate.Method);
+        }
+
+        /// <summary>
+        /// Removes all persistent listeners that invoke the specified method.
+        /// </summary>
+        /// <param name="method">Method info of the method to remove.</param>
+        /// <returns>The number of listeners removed.</returns>
+        [PublicAPI]
+        public int RemovePersistentListener(MethodInfo method)
+        {
+            if (method == null)
+                throw new ArgumentNullException(nameof(method));
+
+            int removedCount = 0;
+
+            for (int i = _persistentListeners.Length - 1; i >= 0; i--)
+            {
+                var listener = _persistentListeners[i];
+
+                // Проверяем, соответствует ли метод слушателя удаляемому методу
+                if (listener.MethodInfo != null &&
+                    listener.MethodInfo == method)
+                {
+                    RemovePersistentListenerAt(i);
+                    removedCount++;
+                }
+            }
+
+            return removedCount;
+        }
+
+        /// <summary>
+        /// Removes all persistent listeners that invoke the specified method on the specified target.
+        /// </summary>
+        /// <typeparam name="T">Type of the delegate that references the method to remove.</typeparam>
+        /// <param name="methodDelegate">Delegate that references the method to remove.</param>
+        /// <param name="target">Target object of the listener to remove.</param>
+        /// <returns>The number of listeners removed.</returns>
+        [PublicAPI]
+        public int RemovePersistentListener<T>(T methodDelegate, Object target) where T : Delegate
+        {
+            if (methodDelegate == null)
+                throw new ArgumentNullException(nameof(methodDelegate));
+            if (target == null)
+                throw new ArgumentNullException(nameof(target));
+
+            return RemovePersistentListener(methodDelegate.Method, target);
+        }
+
+        /// <summary>
+        /// Removes all persistent listeners that invoke the specified method on the specified target.
+        /// </summary>
+        /// <param name="method">Method info of the method to remove.</param>
+        /// <param name="target">Target object of the listener to remove.</param>
+        /// <returns>The number of listeners removed.</returns>
+        [PublicAPI]
+        public int RemovePersistentListener(MethodInfo method, Object target)
+        {
+            if (method == null)
+                throw new ArgumentNullException(nameof(method));
+            if (target == null)
+                throw new ArgumentNullException(nameof(target));
+
+            int removedCount = 0;
+
+            for (int i = _persistentListeners.Length - 1; i >= 0; i--)
+            {
+                var listener = _persistentListeners[i];
+
+                // Проверяем, соответствует ли метод и цель слушателя
+                if (listener.MethodInfo != null &&
+                    listener.MethodInfo == method &&
+                    listener.Target == target)
+                {
+                    RemovePersistentListenerAt(i);
+                    removedCount++;
+                }
+            }
+
+            return removedCount;
+        }
 
         private static void CheckArguments(MethodInfo method, ref PersistentArgument[] arguments, Type[] eventParamTypes)
         {
