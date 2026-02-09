@@ -37,13 +37,13 @@ namespace ExtEvents
         }
 
         [PublicAPI]
-        public void AddListener(TDelegate listener) => DynamicListeners = (TDelegate)Delegate.Combine(DynamicListeners, listener);
+        public void AddDynamicListener(TDelegate listener) => DynamicListeners = (TDelegate)Delegate.Combine(DynamicListeners, listener);
 
         [PublicAPI]
-        public void RemoveListener(TDelegate listener) => DynamicListeners = (TDelegate)Delegate.Remove(DynamicListeners, listener);
+        public void RemoveDynamicListener(TDelegate listener) => DynamicListeners = (TDelegate)Delegate.Remove(DynamicListeners, listener);
 
         [PublicAPI]
-        public void RemoveAllListeners() => DynamicListeners = null;
+        public void RemoveAllDynamicListeners() => DynamicListeners = null;
 
         protected abstract Type[] GetEventParamTypes();
         protected abstract void InvokeDynamicListeners();
