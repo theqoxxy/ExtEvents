@@ -3,26 +3,15 @@
     using System;
     using TypeReferences;
     using UnityEditor;
-    using UnityEngine.Assertions;
 
     public static class PersistentArgumentHelper
     {
-        public static Type GetTypeFromProperty(SerializedProperty argProperty, string typeFieldName, string fallbackTypeFieldName = null)
+        public static Type GetTypeFromProperty(SerializedProperty property, string primary, string fallback = null)
         {
-            var type = GetTypeFromPropertyInternal(argProperty, typeFieldName);
-
-            if (type == null && fallbackTypeFieldName != null)
-            {
-                type = GetTypeFromPropertyInternal(argProperty, fallbackTypeFieldName);
-            }
-
-            return type;
+            return GetType(property, primary) ?? (fallback != null ? GetType(property, fallback) : null);
         }
 
-        private static Type GetTypeFromPropertyInternal(SerializedProperty argProperty, string typeFieldName)
-        {
-            var typeNameAndAssembly = argProperty.FindPropertyRelative($"{typeFieldName}.{nameof(TypeReference._typeNameAndAssembly)}").stringValue;
-            return Type.GetType(typeNameAndAssembly);
-        }
+        private static Type GetType(SerializedProperty property, string field) => 
+            Type.GetType(property.FindPropertyRelative($"{field}.{nameof(TypeReference._typeNameAndAssembly)}").stringValue);
     }
 }

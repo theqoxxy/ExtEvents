@@ -13,77 +13,83 @@
 
     public static class DynamicListenersDrawer
     {
-        public static float GetHeight(SerializedProperty extEventProperty)
+        private const float LineHeight = 18f;
+        private const float Padding = 2f;
+
+        public static float GetHeight(SerializedProperty prop)
         {
-            bool isEventExpanded = extEventProperty.FindPropertyRelative(nameof(BaseExtEvent.Expanded)).boolValue;
-
-            if (!isEventExpanded)
+            if (!prop.FindPropertyRelative(nameof(BaseExtEvent.Expanded)).boolValue) 
                 return 0f;
 
-            var eventObject = PropertyObjectCache.GetObject<BaseExtEvent>(extEventProperty);
-
-            if (eventObject?._dynamicListeners == null)
+            var obj = PropertyObjectCache.GetObject<BaseExtEvent>(prop);
+            if (obj?._dynamicListeners == null) 
                 return 0f;
 
-            return (EditorGUIUtility.singleLineHeight + EditorPackageSettings.LinePadding) * (extEventProperty.isExpanded ? eventObject._dynamicListeners.GetInvocationList().Length : 0);
+            return (LineHeight + Padding) * (prop.isExpanded ? obj._dynamicListeners.GetInvocationList().Length : 0);
         }
 
-        public static void DrawListeners(SerializedProperty extEventProperty, Rect totalRect, float listHeight)
+        public static void DrawListeners(SerializedProperty prop, Rect total, float listHeight)
         {
-            using var _ = EditorGUIHelper.IndentLevelBlock(EditorGUI.indentLevel + 2);
+            using var indent = new EditorGUI.IndentLevelScope(EditorGUI.indentLevel + 2);
 
-            bool isEventExpanded = extEventProperty.FindPropertyRelative(nameof(BaseExtEvent.Expanded)).boolValue;
-
-            if (!isEventExpanded)
+            if (!prop.FindPropertyRelative(nameof(BaseExtEvent.Expanded)).boolValue) 
                 return;
 
-            var eventObject = PropertyObjectCache.GetObject<BaseExtEvent>(extEventProperty);
-            if (eventObject._dynamicListeners == null)
+            var obj = PropertyObjectCache.GetObject<BaseExtEvent>(prop);
+            if (obj._dynamicListeners == null) 
                 return;
 
-            Rect currentRect = new Rect(totalRect) { height = EditorGUIUtility.singleLineHeight, y = totalRect.y + listHeight - EditorGUIUtility.singleLineHeight - EditorPackageSettings.LinePadding };
-
-            extEventProperty.isExpanded = EditorGUI.Foldout(currentRect, extEventProperty.isExpanded, "Dynamic Listeners", true);
-
-            if (!extEventProperty.isExpanded)
-                return;
-
-            foreach (var @delegate in eventObject._dynamicListeners.GetInvocationList())
+            var rect = new Rect(total)
             {
-                currentRect.y += EditorGUIUtility.singleLineHeight + EditorPackageSettings.LinePadding;
-                float halfWidth = currentRect.width / 2f;
-                var typeRect = new Rect(currentRect) { width = halfWidth };
-                var methodRect = new Rect(currentRect) { x = currentRect.x + halfWidth, width = halfWidth };
+                height = LineHeight,
+                y = total.y + listHeight - LineHeight - Padding
+            };
 
-                string methodName = $"{@delegate.Method.Name}()";
-                if (methodName.StartsWith("<"))
-                    methodName = "Lambda Expression";
+            prop.isExpanded = EditorGUI.Foldout(rect, prop.isExpanded, "Dynamic Listeners", true);
+            if (!prop.isExpanded) 
+                return;
 
-                DrawDynamicType(typeRect, @delegate);
-                EditorGUI.LabelField(methodRect, methodName);
+            foreach (var d in obj._dynamicListeners.GetInvocationList())
+            {
+                rect.y += LineHeight + Padding;
+                var (typeRect, methodRect) = Split(rect);
+                
+                DrawTarget(typeRect, d);
+                EditorGUI.LabelField(methodRect, GetMethodName(d));
             }
         }
 
-        private static void DrawDynamicType(Rect rect, Delegate @delegate)
+        private static (Rect, Rect) Split(Rect rect)
         {
-            if (@delegate.Target is Object objectTarget)
+            float half = rect.width / 2f;
+            return (new Rect(rect) { width = half }, new Rect(rect) { x = rect.x + half, width = half });
+        }
+
+        private static void DrawTarget(Rect rect, Delegate d)
+        {
+            if (d.Target is Object target)
             {
                 using (new EditorGUI.DisabledScope(true))
                 {
 #if GENERIC_UNITY_OBJECTS
-                    GenericObjectDrawer
+                    GenericObjectDrawer.ObjectField(rect, GUIContent.none, target, target.GetType(), true);
 #else
-                    EditorGUI
+                    EditorGUI.ObjectField(rect, GUIContent.none, target, target.GetType(), true);
 #endif
-                        .ObjectField(rect, GUIContent.none, objectTarget, objectTarget.GetType(), true);
                 }
-
-                return;
             }
+            else
+            {
+                var name = d.Method.DeclaringType?.FullName ?? "";
+                if (name.EndsWith("<>c")) name = name[..^4];
+                EditorGUI.LabelField(rect, name.GetSubstringAfterLast('.'));
+            }
+        }
 
-            string typeFullName = @delegate.Method.DeclaringType.FullName;
-            string typeName = typeFullName.EndsWith("<>c") ? typeFullName.Substring(0, typeFullName.Length - 4).GetSubstringAfterLast('.') : typeFullName.GetSubstringAfterLast('.');
-            EditorGUI.LabelField(rect, typeName);
+        private static string GetMethodName(Delegate d)
+        {
+            var name = d.Method.Name;
+            return name.StartsWith('<') ? "Lambda Expression" : $"{name}()";
         }
     }
 }

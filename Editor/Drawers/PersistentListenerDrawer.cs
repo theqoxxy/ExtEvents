@@ -20,310 +20,253 @@ namespace ExtEvents.Editor
     [CustomPropertyDrawer(typeof(PersistentListener))]
     public class PersistentListenerDrawer : PropertyDrawer
     {
-        private static readonly Dictionary<(SerializedObject serializedObject, string propertyPath), PersistentListenerInfo> _previousListenerValues = new();
+        private static readonly Dictionary<(SerializedObject, string), ListenerState> _stateCache = new();
         private Rect _methodRect;
+
+        private const float LinePadding = 2f;
+        private static readonly float LineHeight = EditorGUIUtility.singleLineHeight;
 
         public override float GetPropertyHeight(SerializedProperty property, GUIContent label)
         {
-            const int constantLinesCount = 2;
-            return (EditorGUIUtility.singleLineHeight + EditorPackageSettings.LinePadding) * constantLinesCount + GetSerializedArgsHeight(property);
-        }
-
-        private static float GetSerializedArgsHeight(SerializedProperty property)
-        {
             if (!MethodInfoDrawer.HasMethod(property))
-                return 0f;
+                return (LineHeight + LinePadding) * 2;
 
-            var argsArray = property.FindPropertyRelative(nameof(PersistentListener._persistentArguments));
-            float totalHeight = 0f;
-
-            for (int i = 0; i < argsArray.arraySize; i++)
-            {
-                totalHeight += EditorGUI.GetPropertyHeight(argsArray.GetArrayElementAtIndex(i)) + EditorPackageSettings.LinePadding;
-            }
-
-            return totalHeight;
+            var args = property.FindPropertyRelative(nameof(PersistentListener._persistentArguments));
+            float total = (LineHeight + LinePadding) * 2;
+            for (int i = 0; i < args.arraySize; i++)
+                total += EditorGUI.GetPropertyHeight(args.GetArrayElementAtIndex(i)) + LinePadding;
+            return total;
         }
 
         public override void OnGUI(Rect position, SerializedProperty property, GUIContent label)
         {
-            var currentRect = new Rect(position) { height = EditorGUIUtility.singleLineHeight };
-            currentRect.y += EditorPackageSettings.LinePadding;
+            var rect = new Rect(position) { height = LineHeight };
+            rect.y += LinePadding;
+            _methodRect = new Rect(rect) { y = rect.y + LineHeight + LinePadding };
+
+            var callState = property.FindPropertyRelative(nameof(PersistentListener.CallState));
+            var state = (UnityEventCallState)callState.enumValueIndex;
             
-            _methodRect = new Rect(currentRect) { 
-                y = currentRect.y + EditorGUIUtility.singleLineHeight + EditorPackageSettings.LinePadding 
-            };
+            float stateWidth = GetStateWidth(state);
+            var stateRect = new Rect(rect) { width = stateWidth - 10f };
+            var targetRect = new Rect(rect) { x = rect.x + stateWidth, width = rect.width - stateWidth };
 
-            DrawCallStateAndTarget(property, currentRect);
-            DrawMethodAndArguments(property);
+            if (EditorGUI.DropdownButton(stateRect, GetStateContent(state), FocusType.Passive, EditorStyles.miniPullDown))
+                ShowStateMenu(callState);
+
+            DrawTarget(property, targetRect);
+            DrawMethodAndArgs(property);
         }
 
-        private void DrawCallStateAndTarget(SerializedProperty property, Rect currentRect)
+        private static void ShowStateMenu(SerializedProperty callState)
         {
-            var callStateProp = property.FindPropertyRelative(nameof(PersistentListener.CallState));
-            (var callStateRect, var targetRect) = currentRect.CutVertically(GetCallStateWidth((UnityEventCallState)callStateProp.enumValueIndex));
-            callStateRect.width -= 10f;
-
-            DrawCallState(callStateRect, callStateProp);
-            DrawTargetField(property, targetRect);
-        }
-
-        private void DrawMethodAndArguments(SerializedProperty property)
-        {
-            MethodInfoDrawer.Draw(_methodRect, property, out var paramNames);
-
-            bool argumentsChanged = DrawArguments(property, paramNames);
-            bool methodChanged = CheckMethodChanges(property);
-
-            if (argumentsChanged || methodChanged)
-            {
-                Reinitialize(property);
-            }
-        }
-
-        private static void DrawCallState(Rect rect, SerializedProperty callStateProp)
-        {
-            if (!EditorGUI.DropdownButton(rect, GetCallStateContent((UnityEventCallState)callStateProp.enumValueIndex), FocusType.Passive, EditorStyles.miniPullDown))
-                return;
-
             var menu = new GenericMenu();
-            foreach (UnityEventCallState state in Enum.GetValues(typeof(UnityEventCallState)))
+            foreach (UnityEventCallState value in Enum.GetValues(typeof(UnityEventCallState)))
             {
-                menu.AddItem(
-                    new GUIContent(GetCallStateFullName(state)),
-                    callStateProp.enumValueIndex == (int)state,
-                    () => SetCallState(callStateProp, state)
-                );
+                var localValue = value;
+                menu.AddItem(new GUIContent(GetStateName(value)), callState.enumValueIndex == (int)value, 
+                    () => SetState(callState, localValue));
             }
             menu.ShowAsContext();
         }
 
-        private static void SetCallState(SerializedProperty callStateProp, UnityEventCallState state)
+        private static void SetState(SerializedProperty callState, UnityEventCallState value)
         {
-            callStateProp.enumValueIndex = (int)state;
-            callStateProp.serializedObject.ApplyModifiedProperties();
+            callState.enumValueIndex = (int)value;
+            callState.serializedObject.ApplyModifiedProperties();
         }
 
-        private void DrawTargetField(SerializedProperty property, Rect rect)
+        private void DrawTarget(SerializedProperty property, Rect rect)
         {
-            bool isStatic = property.FindPropertyRelative(nameof(PersistentListener._isStatic)).boolValue;
-            var targetProp = property.FindPropertyRelative(nameof(PersistentListener._target));
-
+            var isStatic = property.FindPropertyRelative(nameof(PersistentListener._isStatic)).boolValue;
+            
             if (isStatic)
             {
                 EditorGUI.PropertyField(rect, property.FindPropertyRelative(nameof(PersistentListener._staticType)), GUIContent.none);
                 return;
             }
 
-            var newTarget = DrawObjectField(rect, targetProp.objectReferenceValue);
+            var target = property.FindPropertyRelative(nameof(PersistentListener._target));
+            var newTarget = DrawObjectField(rect, target.objectReferenceValue);
             
-            if (targetProp.objectReferenceValue == newTarget)
+            if (target.objectReferenceValue == newTarget) 
                 return;
 
-            HandleNewTarget(property, targetProp, newTarget);
-        }
-
-        private static Object DrawObjectField(Rect rect, Object currentValue)
-        {
-#if GENERIC_UNITY_OBJECTS
-            return GenericObjectDrawer.ObjectField(rect, GUIContent.none, currentValue, typeof(Object), true);
-#else
-            return EditorGUI.ObjectField(rect, GUIContent.none, currentValue, typeof(Object), true);
-#endif
-        }
-
-        private void HandleNewTarget(SerializedProperty property, SerializedProperty targetProp, Object newTarget)
-        {
-            if (newTarget is GameObject gameObject)
+            if (newTarget is GameObject go)
             {
-                ShowComponentDropdown(property, targetProp, gameObject);
+                ShowComponentPicker(property, target, go);
             }
-            else if (newTarget is Component || newTarget is ScriptableObject || newTarget is null)
+            else if (newTarget == null || newTarget is Component || newTarget is ScriptableObject)
             {
-                SetTargetAndUpdate(property, targetProp, newTarget);
+                target.objectReferenceValue = newTarget;
+                ExtEventDrawer.ResetListCache(property.GetParent().GetParent());
+                MethodInfoDrawer.ShowMethodDropdown(_methodRect, property);
             }
             else
             {
-                Debug.LogWarning($"Cannot assign an object of type {newTarget.GetType()} to the target field. Only GameObjects, Components, and ScriptableObjects can be assigned.");
+                Debug.LogWarning("Target must be GameObject, Component, ScriptableObject, or null");
             }
         }
 
-        private void SetTargetAndUpdate(SerializedProperty property, SerializedProperty targetProp, Object newTarget)
+        private static Object DrawObjectField(Rect rect, Object value)
         {
-            targetProp.objectReferenceValue = newTarget;
-            ExtEventDrawer.ResetListCache(property.GetParent().GetParent());
-            MethodInfoDrawer.ShowMethodDropdown(_methodRect, property);
+#if GENERIC_UNITY_OBJECTS
+            return GenericObjectDrawer.ObjectField(rect, GUIContent.none, value, typeof(Object), true);
+#else
+            return EditorGUI.ObjectField(rect, GUIContent.none, value, typeof(Object), true);
+#endif
         }
 
-        private bool DrawArguments(SerializedProperty listenerProperty, List<string> paramNames)
+        private void ShowComponentPicker(SerializedProperty property, SerializedProperty target, GameObject go)
         {
-            var argumentsArray = listenerProperty.FindPropertyRelative(nameof(PersistentListener._persistentArguments));
+            var items = go.GetComponents<Component>()
+                .Where(c => c != null && !c.hideFlags.HasFlag(HideFlags.HideInInspector))
+                .Prepend<Object>(go)
+                .Select(c => new DropdownItem<Object>(c, GetDisplayName(c), GetIcon(c)))
+                .ToList();
 
-            if (paramNames == null || paramNames.Count < argumentsArray.arraySize)
-                return false;
+            new DropdownMenu<Object>(items, selected =>
+            {
+                target.objectReferenceValue = selected;
+                target.serializedObject.ApplyModifiedProperties();
+                ExtEventDrawer.ResetListCache(property.GetParent().GetParent());
+                MethodInfoDrawer.ShowMethodDropdown(_methodRect, property);
+            }).ShowAsContext();
+        }
 
-            EditorGUI.BeginChangeCheck();
+        private static string GetDisplayName(Object obj)
+        {
+            var type = obj.GetType();
+            var menu = type.GetCustomAttribute<AddComponentMenu>();
+            return menu != null && !string.IsNullOrEmpty(menu.componentMenu) 
+                ? menu.componentMenu.Split('/').Last() 
+                : ObjectNames.NicifyVariableName(type.Name);
+        }
 
+        private static Texture GetIcon(Object obj) => 
+            EditorGUIUtility.ObjectContent(obj, obj.GetType()).image;
+
+        private void DrawMethodAndArgs(SerializedProperty property)
+        {
+            MethodInfoDrawer.Draw(_methodRect, property, out var paramNames);
+
+            if (paramNames == null) 
+                return;
+
+            var args = property.FindPropertyRelative(nameof(PersistentListener._persistentArguments));
+            if (args.arraySize != paramNames.Count) 
+                return;
+
+            bool changed = false;
             var rect = _methodRect;
-            rect.y += EditorGUIUtility.singleLineHeight + EditorPackageSettings.LinePadding;
+            rect.y += LineHeight + LinePadding;
 
-            for (int i = 0; i < argumentsArray.arraySize; i++)
+            for (int i = 0; i < args.arraySize; i++)
             {
-                var argumentProp = argumentsArray.GetArrayElementAtIndex(i);
-                var propertyHeight = EditorGUI.GetPropertyHeight(argumentProp);
+                var arg = args.GetArrayElementAtIndex(i);
+                float height = EditorGUI.GetPropertyHeight(arg);
                 
-                rect.height = propertyHeight;
-                rect.y += EditorPackageSettings.LinePadding;
+                rect.height = height;
+                rect.y += LinePadding;
 
-                string label = EditorPackageSettings.NicifyArgumentNames ? 
-                    ObjectNames.NicifyVariableName(paramNames[i]) : paramNames[i];
+                EditorGUI.BeginChangeCheck();
+                string label = EditorPackageSettings.NicifyArgumentNames 
+                    ? ObjectNames.NicifyVariableName(paramNames[i]) 
+                    : paramNames[i];
+                EditorGUI.PropertyField(rect, arg, new GUIContent(label));
                 
-                EditorGUI.PropertyField(rect, argumentProp, GUIContentHelper.Temp(label));
-                rect.y += propertyHeight;
+                if (EditorGUI.EndChangeCheck())
+                    changed = true;
+
+                rect.y += height;
             }
 
-            bool changed = EditorGUI.EndChangeCheck();
+            if (changed || DetectStateChange(property))
+                ResetListener(property);
+        }
 
-            if (changed)
+        private bool DetectStateChange(SerializedProperty property)
+        {
+            var key = (property.serializedObject, property.propertyPath);
+            
+            string type = property.FindPropertyRelative($"{nameof(PersistentListener._staticType)}.{nameof(TypeReference._typeNameAndAssembly)}").stringValue;
+            var target = property.FindPropertyRelative(nameof(PersistentListener._target)).objectReferenceValue;
+            string method = property.FindPropertyRelative(nameof(PersistentListener._methodName)).stringValue;
+
+            if (!_stateCache.TryGetValue(key, out var state))
             {
-                listenerProperty.serializedObject.ApplyModifiedProperties();
-                listenerProperty.serializedObject.Update();
+                _stateCache[key] = new ListenerState(type, target, method);
+                return false;
+            }
+
+            bool changed = false;
+
+            if (type != state.TypeName)
+            {
+                changed = true;
+                state.TypeName = type;
+                MethodInfoDrawer.ShowMethodDropdown(_methodRect, property);
+            }
+
+            if (target != state.Target)
+            {
+                changed = true;
+                state.Target = target;
+            }
+
+            if (method != state.MethodName)
+            {
+                changed = true;
+                state.MethodName = method;
             }
 
             return changed;
         }
 
-        private bool CheckMethodChanges(SerializedProperty listenerProperty)
+        public static void ResetListener(SerializedProperty property)
         {
-            var key = (listenerProperty.serializedObject, listenerProperty.propertyPath);
-            var currentType = listenerProperty.FindPropertyRelative($"{nameof(PersistentListener._staticType)}.{nameof(TypeReference._typeNameAndAssembly)}").stringValue;
-            var currentTarget = listenerProperty.FindPropertyRelative(nameof(PersistentListener._target)).objectReferenceValue;
-            var currentMethodName = listenerProperty.FindPropertyRelative(nameof(PersistentListener._methodName)).stringValue;
-
-            if (!_previousListenerValues.TryGetValue(key, out var listenerInfo))
-            {
-                _previousListenerValues.Add(key, new PersistentListenerInfo(currentType, currentTarget, currentMethodName));
-                return false;
-            }
-
-            bool infoChanged = false;
-
-            if (currentType != listenerInfo.TypeName)
-            {
-                infoChanged = true;
-                listenerInfo.TypeName = currentType;
-                MethodInfoDrawer.ShowMethodDropdown(_methodRect, listenerProperty);
-            }
-
-            if (currentTarget != listenerInfo.Target)
-            {
-                infoChanged = true;
-                listenerInfo.Target = currentTarget;
-            }
-
-            if (currentMethodName != listenerInfo.MethodName)
-            {
-                infoChanged = true;
-                listenerInfo.MethodName = currentMethodName;
-            }
-
-            return infoChanged;
+            property.serializedObject.ApplyModifiedProperties();
+            PropertyObjectCache.GetObject<PersistentListener>(property)._initializationComplete = false;
         }
 
-        private void ShowComponentDropdown(SerializedProperty listenerProperty, SerializedProperty targetProperty, GameObject gameObject)
-        {
-            var components = gameObject
-                .GetComponents<Component>()
-                .Where(component => component != null && !component.hideFlags.ContainsFlag(HideFlags.HideInInspector))
-                .Prepend<Object>(gameObject);
-
-            var dropdownItems = components.Select(component => 
-                new DropdownItem<Object>(component, GetComponentName(component), GetComponentIcon(component))
-            ).ToList();
-
-            var tree = new DropdownMenu<Object>(dropdownItems, component => 
-            {
-                targetProperty.objectReferenceValue = component;
-                targetProperty.serializedObject.ApplyModifiedProperties();
-                ExtEventDrawer.ResetListCache(listenerProperty.GetParent().GetParent());
-                MethodInfoDrawer.ShowMethodDropdown(_methodRect, listenerProperty);
-            });
-
-            tree.ShowAsContext();
-        }
-
-        private static string GetComponentName(Object component)
-        {
-            var componentType = component.GetType();
-            var componentMenu = componentType.GetCustomAttribute<AddComponentMenu>();
-
-            if (componentMenu != null && !string.IsNullOrEmpty(componentMenu.componentMenu))
-            {
-                return componentMenu.componentMenu.GetSubstringAfterLast('/');
-            }
-
-            return ObjectNames.NicifyVariableName(componentType.Name);
-        }
-
-        private static Texture GetComponentIcon(Object component)
-        {
-            return EditorGUIUtility.ObjectContent(component, component.GetType()).image;
-        }
-
-        public static void Reinitialize(SerializedProperty listenerProperty)
-        {
-            listenerProperty.serializedObject.ApplyModifiedProperties();
-            var listener = PropertyObjectCache.GetObject<PersistentListener>(listenerProperty);
-            listener._initializationComplete = false;
-        }
-
-        private static float GetCallStateWidth(UnityEventCallState callState) => callState switch
+        private static float GetStateWidth(UnityEventCallState state) => state switch
         {
             UnityEventCallState.EditorAndRuntime => 58f,
             UnityEventCallState.RuntimeOnly => 48f,
             UnityEventCallState.Off => 58f,
-            _ => throw new NotImplementedException()
+            _ => 58f
         };
 
-        private static GUIContent GetCallStateContent(UnityEventCallState callState) => callState switch
+        private static GUIContent GetStateContent(UnityEventCallState state) => state switch
         {
-            UnityEventCallState.EditorAndRuntime => GUIContentHelper.Temp("E|R", IconCache.EditorRuntime),
-            UnityEventCallState.RuntimeOnly => GUIContentHelper.Temp("R", IconCache.Runtime),
-            UnityEventCallState.Off => GUIContentHelper.Temp("Off", IconCache.Off),
-            _ => throw new NotImplementedException()
+            UnityEventCallState.EditorAndRuntime => new GUIContent("E|R", Icons.EditorRuntime),
+            UnityEventCallState.RuntimeOnly => new GUIContent("R", Icons.Runtime),
+            UnityEventCallState.Off => new GUIContent("Off", Icons.Off),
+            _ => new GUIContent("Off")
         };
 
-        private static string GetCallStateFullName(UnityEventCallState callState) => callState switch
+        private static string GetStateName(UnityEventCallState state) => state switch
         {
             UnityEventCallState.EditorAndRuntime => "Editor and Runtime",
             UnityEventCallState.RuntimeOnly => "Runtime Only",
             UnityEventCallState.Off => "Off",
-            _ => throw new NotImplementedException()
+            _ => "Off"
         };
 
-        private class PersistentListenerInfo
+        private class ListenerState
         {
             public string TypeName;
             public Object Target;
             public string MethodName;
-
-            public PersistentListenerInfo(string typeName, Object target, string methodName)
-            {
-                TypeName = typeName;
-                Target = target;
-                MethodName = methodName;
-            }
+            public ListenerState(string type, Object target, string method) 
+                => (TypeName, Target, MethodName) = (type, target, method);
         }
 
-        private static class IconCache
+        private static class Icons
         {
-            private static Texture _offIcon;
-            private static Texture _editorRuntimeIcon;
-            private static Texture _runtimeIcon;
-
-            public static Texture Off => _offIcon ??= EditorGUIUtility.IconContent("sv_icon_dot6_sml").image;
-            public static Texture EditorRuntime => _editorRuntimeIcon ??= EditorGUIUtility.IconContent("sv_icon_dot4_sml").image;
-            public static Texture Runtime => _runtimeIcon ??= EditorGUIUtility.IconContent("sv_icon_dot3_sml").image;
+            public static readonly Texture Off = EditorGUIUtility.IconContent("sv_icon_dot6_sml").image;
+            public static readonly Texture EditorRuntime = EditorGUIUtility.IconContent("sv_icon_dot4_sml").image;
+            public static readonly Texture Runtime = EditorGUIUtility.IconContent("sv_icon_dot3_sml").image;
         }
     }
 }

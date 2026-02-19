@@ -14,346 +14,241 @@
 
     public static class MethodInfoDrawer
     {
-        private static readonly Dictionary<string, string> _builtInTypes = new Dictionary<string, string>
+        private static readonly Dictionary<string, string> TypeAliases = new()
         {
-            { "Boolean", "bool" },
-            { "Byte", "byte" },
-            { "SByte", "sbyte" },
-            { "Char", "char" },
-            { "Decimal", "decimal" },
-            { "Double", "double" },
-            { "Single", "float" },
-            { "Int32", "int" },
-            { "UInt32", "uint" },
-            { "Int64", "long" },
-            { "UInt64", "ulong" },
-            { "Int16", "short" },
-            { "UInt16", "ushort" },
-            { "Object", "object" },
-            { "String", "string" }
+            ["Boolean"] = "bool", ["Byte"] = "byte", ["SByte"] = "sbyte", ["Char"] = "char",
+            ["Decimal"] = "decimal", ["Double"] = "double", ["Single"] = "float", ["Int32"] = "int",
+            ["UInt32"] = "uint", ["Int64"] = "long", ["UInt64"] = "ulong", ["Int16"] = "short",
+            ["UInt16"] = "ushort", ["Object"] = "object", ["String"] = "string"
         };
 
-        public static bool HasMethod(SerializedProperty listenerProperty)
+        private static readonly Color ErrorColor = new(1f, 0f, 0f, .5f);
+
+        public static bool HasMethod(SerializedProperty prop)
         {
-            var isStatic = listenerProperty.FindPropertyRelative(nameof(PersistentListener._isStatic)).boolValue;
-            string currentMethodName = listenerProperty.FindPropertyRelative(nameof(PersistentListener._methodName)).stringValue;
-            var declaringType = GetDeclaringType(listenerProperty, isStatic);
-            return GetMethodInfo(declaringType, listenerProperty, isStatic, currentMethodName) != null;
+            var name = prop.FindPropertyRelative(nameof(PersistentListener._methodName)).stringValue;
+            if (string.IsNullOrEmpty(name)) return false;
+            
+            var isStatic = prop.FindPropertyRelative(nameof(PersistentListener._isStatic)).boolValue;
+            var type = GetTargetType(prop, isStatic);
+            return type != null && GetMethod(type, prop, isStatic, name) != null;
         }
 
-        public static void Draw(Rect rect, SerializedProperty listenerProperty, out List<string> argNames)
+        public static void Draw(Rect rect, SerializedProperty prop, out List<string> argNames)
         {
-            var isStatic = GetIsStatic(listenerProperty);
-            var declaringType = GetDeclaringType(listenerProperty, isStatic);
+            argNames = null;
+            var isStatic = prop.FindPropertyRelative(nameof(PersistentListener._isStatic)).boolValue;
+            var type = GetTargetType(prop, isStatic);
+            var name = prop.FindPropertyRelative(nameof(PersistentListener._methodName)).stringValue;
+            var method = GetMethod(type, prop, isStatic, name);
+            
+            argNames = method?.GetParameters().Select(p => p.Name).ToList();
 
-            var previousGuiColor = GUI.backgroundColor;
-
-            string currentMethodName = listenerProperty.FindPropertyRelative(nameof(PersistentListener._methodName)).stringValue;
-
-            var methodInfo = GetMethodInfo(declaringType, listenerProperty, isStatic, currentMethodName);
-
-            argNames = methodInfo != null ? methodInfo.GetParameters().Select(param => param.Name).ToList() : null;
-
-            if (methodInfo == null && ! string.IsNullOrEmpty(currentMethodName))
+            using (new EditorGUI.DisabledGroupScope(type == null))
             {
-                GUI.backgroundColor = new Color(1f, 0f, 0f, .5f);
+                var color = GUI.backgroundColor;
+                if (method == null && !string.IsNullOrEmpty(name))
+                    GUI.backgroundColor = ErrorColor;
+
+                var display = GetDisplayText(name, method);
+                if (EditorGUI.DropdownButton(rect, new GUIContent(display), FocusType.Passive))
+                    ShowMenu(type, prop, !isStatic, method);
+
+                GUI.backgroundColor = color;
             }
-
-            // ReSharper disable once PossibleNullReferenceException
-            if (currentMethodName.IsPropertySetter())
-                currentMethodName = currentMethodName.Substring(4);
-
-            string popupLabel = string.IsNullOrEmpty(currentMethodName) ? "No Function" : (methodInfo != null ? currentMethodName : currentMethodName + " {Missing}");
-
-            using (new EditorGUI.DisabledGroupScope(declaringType == null))
-            {
-                if (EditorGUI.DropdownButton(rect, GUIContentHelper.Temp(popupLabel), FocusType.Passive))
-                {
-                    ShowMenu(declaringType, listenerProperty, !isStatic, methodInfo);
-                }
-            }
-
-            GUI.backgroundColor = previousGuiColor;
         }
 
-        private static bool GetIsStatic(SerializedProperty listenerProperty) => listenerProperty.FindPropertyRelative(nameof(PersistentListener._isStatic)).boolValue;
-
-        public static string GetCurrentMethodName(SerializedProperty listenerProperty)
+        public static void ShowMethodDropdown(Rect rect, SerializedProperty prop)
         {
-            return listenerProperty.FindPropertyRelative(nameof(PersistentListener._methodName)).stringValue;
-        }
-
-        /// <summary>
-        /// Shows a method dropdown is no method was previously selected.
-        /// Used for decreasing a number of clicks the user must perform to choose a method.
-        /// Once a type or object is chosen, a method dropdown is open.
-        /// </summary>
-        /// <param name="methodRect">The rectangle of the method line.</param>
-        /// <param name="listenerProperty">The listener property.</param>
-        public static void ShowMethodDropdown(Rect methodRect, SerializedProperty listenerProperty)
-        {
-            string currentMethodName = GetCurrentMethodName(listenerProperty);
-
-            if ( ! string.IsNullOrEmpty(currentMethodName))
+            if (!string.IsNullOrEmpty(prop.FindPropertyRelative(nameof(PersistentListener._methodName)).stringValue))
                 return;
 
-            bool isStatic = GetIsStatic(listenerProperty);
-            Type declaringType = GetDeclaringType(listenerProperty, isStatic);
+            var isStatic = prop.FindPropertyRelative(nameof(PersistentListener._isStatic)).boolValue;
+            var type = GetTargetType(prop, isStatic);
+            if (type == null) return;
 
-            if (declaringType == null)
-                return;
-
-            ShowMenu(declaringType, listenerProperty, !isStatic, null, GUIUtility.GUIToScreenPoint(methodRect.position));
+            ShowMenu(type, prop, !isStatic, null, GUIUtility.GUIToScreenPoint(rect.position));
         }
 
-        private static Type GetDeclaringType(SerializedProperty listenerProperty, bool isStatic)
+        private static Type GetTargetType(SerializedProperty prop, bool isStatic)
         {
             if (!isStatic)
-            {
-                var target = listenerProperty.FindPropertyRelative(nameof(PersistentListener._target)).objectReferenceValue;
+                return prop.FindPropertyRelative(nameof(PersistentListener._target)).objectReferenceValue?.GetType();
 
-                if (target == null)
-                    return null;
-
-                return target.GetType();
-            }
-
-            var declaringTypeName = listenerProperty.FindPropertyRelative($"{nameof(PersistentListener._staticType)}.{nameof(TypeReference._typeNameAndAssembly)}").stringValue;
-            return Type.GetType(declaringTypeName);
+            var typeName = prop.FindPropertyRelative($"{nameof(PersistentListener._staticType)}.{nameof(TypeReference._typeNameAndAssembly)}").stringValue;
+            return Type.GetType(typeName);
         }
 
-        private static void ShowMenu(Type declaringType, SerializedProperty listenerProperty, bool isInstance, MethodInfo currentMethod, Vector2? buttonPos = null)
+        private static MethodInfo GetMethod(Type type, SerializedProperty prop, bool isStatic, string name)
         {
-            if (declaringType == null)
-                return;
+            if (type == null || string.IsNullOrEmpty(name)) return null;
 
-            var menuItems = new List<DropdownItem<MethodInfo>>();
-
-            var paramTypes = ExtEventDrawer.CurrentEventInfo?.ParamTypes ?? Type.EmptyTypes;
-
-            if (isInstance)
-                menuItems.AddRange(FindInstanceMethods(declaringType, paramTypes));
-
-            menuItems.AddRange(FindStaticMethods(declaringType, paramTypes));
-
-            SortItems(menuItems);
-
-            var itemToSelect = menuItems.Find(menuItem => menuItem.Value == currentMethod);
-
-            if (itemToSelect != null)
-                itemToSelect.IsSelected = true;
-
-            var dropdownMenu = new DropdownMenu<MethodInfo>(menuItems, selectedMethod => OnMethodChosen(currentMethod, selectedMethod, listenerProperty));
-            dropdownMenu.ExpandAllFolders();
-
-            if (buttonPos == null)
-            {
-                dropdownMenu.ShowAsContext();
-            }
-            else
-            {
-                dropdownMenu.ShowDropdown(buttonPos.Value);
-            }
+            var args = prop.FindPropertyRelative(nameof(PersistentListener._persistentArguments));
+            var types = GetArgTypes(args);
+            return types != null ? MethodInfoCache.GetItem(type, name, isStatic, types) : null;
         }
 
-        private static void SortItems(List<DropdownItem<MethodInfo>> items)
+        private static Type[] GetArgTypes(SerializedProperty args)
         {
-            items.Sort((x, y) =>
+            var types = new Type[args.arraySize];
+            for (int i = 0; i < args.arraySize; i++)
             {
-                // The order of folders is following:
-                // - Instance Properties
-                // - Instance Methods
-                // - Static Properties
-                // - Static Methods
-                // The method names are sorted alphabetically.
-
-                var xFolder = x.Path.GetSubstringBefore('/');
-                var yFolder = y.Path.GetSubstringBefore('/');
-
-                // If folders are the same, run an alphabetic comparison on method names
-                if (xFolder == yFolder)
-                    return string.Compare(x.Path.GetSubstringAfterLast('/'), y.Path.GetSubstringAfterLast('/'), StringComparison.Ordinal);
-
-                var xFirstWord = xFolder.GetSubstringBefore(' ');
-                var yFirstWord = yFolder.GetSubstringBefore(' ');
-
-                // If the first words are different, Static must be lower in the list than Instance.
-                if (xFirstWord != yFirstWord)
-                    return xFirstWord == "Static" ? 1 : -1;
-
-                var xLastWord = xFolder.GetSubstringAfterLast(' ');
-                var yLastWord = yFolder.GetSubstringAfterLast(' ');
-
-                // If the first words are equal, but last words differ, Methods must be lower in the list than Properties.
-                if (xLastWord != yLastWord)
-                    return xLastWord == "Methods" ? 1 : -1;
-
-                return 0;
-            });
-        }
-
-        private static MethodInfo GetMethodInfo(Type declaringType, SerializedProperty listenerProperty, bool isStatic, string currentMethodName)
-        {
-            if (string.IsNullOrEmpty(currentMethodName) || declaringType == null)
-                return null;
-
-            var serializedArgs = listenerProperty.FindPropertyRelative(nameof(PersistentListener._persistentArguments));
-            var argTypes = GetTypesFromSerializedArgs(serializedArgs);
-
-            if (argTypes == null)
-                return null;
-
-            return MethodInfoCache.GetItem(declaringType, currentMethodName, isStatic, argTypes);
-        }
-
-        private static Type[] GetTypesFromSerializedArgs(SerializedProperty serializedArgs)
-        {
-            var types = new Type[serializedArgs.arraySize];
-
-            for (int i = 0; i < types.Length; i++)
-            {
-                types[i] = Type.GetType(serializedArgs.GetArrayElementAtIndex(i).FindPropertyRelative($"{nameof(PersistentArgument._targetType)}.{nameof(TypeReference._typeNameAndAssembly)}").stringValue);
-                if (types[i] == null)
-                    return null;
+                var name = args.GetArrayElementAtIndex(i)
+                    .FindPropertyRelative($"{nameof(PersistentArgument._targetType)}.{nameof(TypeReference._typeNameAndAssembly)}").stringValue;
+                
+                types[i] = Type.GetType(name);
+                if (types[i] == null) return null;
             }
-
             return types;
         }
 
-        private static IEnumerable<DropdownItem<MethodInfo>> FindStaticMethods(Type declaringType, Type[] eventParamTypes)
+        private static void ShowMenu(Type type, SerializedProperty prop, bool instance, MethodInfo current, Vector2? pos = null)
         {
-            var staticMethods = GetEligibleMethods(declaringType, eventParamTypes, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
-            return GetDropdownItems(staticMethods, "Static");
+            var paramTypes = ExtEventDrawer.CurrentEventInfo?.ParamTypes ?? Type.EmptyTypes;
+            var items = new List<DropdownItem<MethodInfo>>();
+
+            if (instance)
+                items.AddRange(GetMethods(type, paramTypes, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance, "Instance"));
+            
+            items.AddRange(GetMethods(type, paramTypes, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static, "Static"));
+
+            SortItems(items);
+
+            var selected = items.Find(i => i.Value == current);
+            if (selected != null) selected.IsSelected = true;
+
+            var menu = new DropdownMenu<MethodInfo>(items, m => OnMethodSelected(current, m, prop));
+            menu.ExpandAllFolders();
+
+            if (pos.HasValue) menu.ShowDropdown(pos.Value);
+            else menu.ShowAsContext();
         }
 
-        private static IEnumerable<DropdownItem<MethodInfo>> FindInstanceMethods(Type declaringType, Type[] eventParamTypes)
+        private static IEnumerable<DropdownItem<MethodInfo>> GetMethods(Type type, Type[] eventParams, BindingFlags flags, string category)
         {
-            var instanceMethods = GetEligibleMethods(declaringType, eventParamTypes, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-            return GetDropdownItems(instanceMethods, "Instance");
+            return type.GetMethods(flags)
+                .Where(m => BaseExtEvent.MethodIsEligible(m, eventParams, 
+                    EditorPackageSettings.IncludeInternalMethods, 
+                    EditorPackageSettings.IncludePrivateMethods))
+                .SelectMany(m => CreateItems(m, category));
         }
 
-        private static IEnumerable<DropdownItem<MethodInfo>> GetDropdownItems(IEnumerable<MethodInfo> methods, string memberDescription)
+        private static IEnumerable<DropdownItem<MethodInfo>> CreateItems(MethodInfo method, string category)
         {
-            foreach (MethodInfo method in methods)
+            var isProp = method.Name.IsPropertySetter();
+            var sub = isProp ? "Properties" : "Methods";
+            var name = FormatMethodName(method, isProp);
+            yield return new DropdownItem<MethodInfo>(method, $"{category} {sub}/{name}", searchName: name);
+        }
+
+        private static string FormatMethodName(MethodInfo method, bool isProp)
+        {
+            if (isProp)
             {
-                bool isProperty = method.Name.IsPropertySetter();
-                string methodName = GetMethodNameForDropdown(method, isProperty);
-                var memberName = isProperty ? "Properties" : "Methods";
-                yield return new DropdownItem<MethodInfo>(method, $"{memberDescription} {memberName}/{methodName}", searchName: methodName);
-            }
-        }
-
-        private static string GetMethodNameForDropdown(MethodInfo method, bool isProperty)
-        {
-            if (isProperty)
-                return $"{method.Name.Substring(4)} ({method.GetParameters()[0].ParameterType.Name.Beautify()})";
-
-            return method.Name + GetParamNames(method);
-        }
-
-        private static IEnumerable<MethodInfo> GetEligibleMethods(Type declaringType, Type[] eventParamTypes,
-            BindingFlags bindingFlags)
-        {
-            // the method cannot be used if it contains at least one argument that is not serializable nor it is passed from the event.
-            return declaringType.GetMethods(bindingFlags)
-                .Where(method => BaseExtEvent.MethodIsEligible(method, eventParamTypes, EditorPackageSettings.IncludeInternalMethods, EditorPackageSettings.IncludePrivateMethods));
-        }
-
-        private static void OnMethodChosen(MethodInfo previousMethod, MethodInfo newMethod, SerializedProperty listenerProperty)
-        {
-            if (previousMethod == newMethod)
-                return;
-
-            var methodNameProp = listenerProperty.Copy().FindPropertyRelative(nameof(PersistentListener._methodName));
-            var serializedArgsProp = listenerProperty.Copy().FindPropertyRelative(nameof(PersistentListener._persistentArguments));
-
-            methodNameProp.stringValue = newMethod.Name;
-            var parameters = newMethod.GetParameters();
-            serializedArgsProp.arraySize = parameters.Length;
-
-            for (int i = 0; i < parameters.Length; i++)
-            {
-                var argProp = serializedArgsProp.GetArrayElementAtIndex(i);
-                InitializeArgumentProperty(argProp, parameters[i].ParameterType);
+                var param = method.GetParameters()[0].ParameterType;
+                return $"{method.Name.Substring(4)} ({Alias(param.Name)})";
             }
 
-            PersistentListenerDrawer.Reinitialize(listenerProperty);
-            ExtEventDrawer.ResetListCache(listenerProperty.GetParent().GetParent());
+            var pars = method.GetParameters();
+            var list = string.Join(", ", pars.Select(p => $"{Alias(p.ParameterType.Name)} {p.Name}"));
+            return $"{method.Name}({list})";
         }
 
-        private static void InitializeArgumentProperty(SerializedProperty argumentProp, Type type)
+        private static string Alias(string name) => 
+            TypeAliases.TryGetValue(name, out var alias) ? alias : name;
+
+        private static void SortItems(List<DropdownItem<MethodInfo>> items)
         {
-            // set target type
+            items.Sort((a, b) =>
             {
-                var serializedTypeRef = new SerializedTypeReference(argumentProp.FindPropertyRelative(nameof(PersistentArgument._targetType)));
-                serializedTypeRef.SetType(type);
+                var aFolder = a.Path.GetSubstringBefore('/');
+                var bFolder = b.Path.GetSubstringBefore('/');
 
-                // When an argument type is not found, there is no need to report that it's missing because the whole method definition is missing and the warning will only confuse the user.
-                serializedTypeRef.SetSuppressLogs(true, false);
-            }
-
-            // Cannot rely on ExtEventPropertyDrawer.CurrentExtEvent because the initialization of argument property occurs
-            // not in the middle of drawing ext events but rather after drawing all the events.
-            // argument => arguments array => listener => listeners array => ext event.
-            var parent = argumentProp.GetParent();
-            if (parent == null)
-                return;
-            
-            var grandParent = parent.GetParent();
-            if (grandParent == null)
-                return;
-            
-            var greatGrandParent = grandParent.GetParent();
-            if (greatGrandParent == null)
-                return;
-            
-            var extEventInfo = ExtEventDrawer.GetExtEventInfo(greatGrandParent.GetParent());
-
-            int matchingParamIndex = -1;
-            bool exactMatch = false;
-
-            for (int i = 0; i < extEventInfo.ParamTypes.Length; i++)
-            {
-                var eventParamType = extEventInfo.ParamTypes[i];
-
-                if (eventParamType.IsAssignableFrom(type))
+                if (aFolder != bFolder)
                 {
-                    exactMatch = true;
-                    matchingParamIndex = i;
-                    break;
+                    var aFirst = aFolder.GetSubstringBefore(' ');
+                    var bFirst = bFolder.GetSubstringBefore(' ');
+                    
+                    if (aFirst != bFirst)
+                        return aFirst == "Static" ? 1 : -1;
+
+                    var aLast = aFolder.GetSubstringAfterLast(' ');
+                    var bLast = bFolder.GetSubstringAfterLast(' ');
+                    
+                    if (aLast != bLast)
+                        return aLast == "Methods" ? 1 : -1;
                 }
 
-                if (Converter.ExistsForTypes(eventParamType, type))
+                return string.Compare(a.Path.GetSubstringAfterLast('/'), b.Path.GetSubstringAfterLast('/'), StringComparison.Ordinal);
+            });
+        }
+
+        private static string GetDisplayText(string name, MethodInfo method)
+        {
+            if (string.IsNullOrEmpty(name)) return "No Function";
+            if (name.IsPropertySetter()) name = name.Substring(4);
+            return method != null ? name : $"{name} {{Missing}}";
+        }
+
+        private static void OnMethodSelected(MethodInfo prev, MethodInfo next, SerializedProperty prop)
+        {
+            if (prev == next) return;
+
+            var name = prop.FindPropertyRelative(nameof(PersistentListener._methodName));
+            var args = prop.FindPropertyRelative(nameof(PersistentListener._persistentArguments));
+
+            name.stringValue = next.Name;
+            
+            var pars = next.GetParameters();
+            args.arraySize = pars.Length;
+
+            for (int i = 0; i < pars.Length; i++)
+                InitArg(args.GetArrayElementAtIndex(i), pars[i].ParameterType, prop);
+
+            PersistentListenerDrawer.ResetListener(prop);
+            ExtEventDrawer.ResetListCache(prop.GetParent().GetParent());
+        }
+
+        private static void InitArg(SerializedProperty arg, Type type, SerializedProperty listener)
+        {
+            var target = new SerializedTypeReference(arg.FindPropertyRelative(nameof(PersistentArgument._targetType)));
+            target.SetType(type);
+            target.SetSuppressLogs(true, false);
+
+            var parent = arg.GetParent()?.GetParent()?.GetParent()?.GetParent();
+            var info = ExtEventDrawer.GetOrCreateEventInfo(parent);
+
+            int match = -1;
+            bool exact = false;
+
+            for (int i = 0; i < info.ParamTypes.Length; i++)
+            {
+                var p = info.ParamTypes[i];
+                if (p.IsAssignableFrom(type))
                 {
-                    matchingParamIndex = i;
+                    exact = true;
+                    match = i;
+                    break;
+                }
+                if (Converter.ExistsForTypes(p, type))
+                {
+                    match = i;
                     break;
                 }
             }
 
-            bool matchingParamFound = matchingParamIndex != -1;
+            bool hasMatch = match != -1;
+            
+            arg.FindPropertyRelative(nameof(PersistentArgument._isSerialized)).boolValue = !hasMatch;
+            arg.FindPropertyRelative(nameof(PersistentArgument._canBeDynamic)).boolValue = hasMatch;
 
-            argumentProp.FindPropertyRelative(nameof(PersistentArgument._isSerialized)).boolValue = !matchingParamFound;
-            argumentProp.FindPropertyRelative(nameof(PersistentArgument._canBeDynamic)).boolValue = matchingParamFound;
-
-            if (matchingParamFound)
+            if (hasMatch)
             {
-                argumentProp.FindPropertyRelative(nameof(PersistentArgument._index)).intValue = matchingParamIndex;
-
-                // If the type of event is not assignable to the type of response, make persistent argument remember
-                // the type of event so that it can implicitly convert the argument when invoking the response.
-                var serializedTypeRef = new SerializedTypeReference(argumentProp.FindPropertyRelative(nameof(PersistentArgument._fromType)));
-                serializedTypeRef.SetType(exactMatch ? type : extEventInfo.ParamTypes[matchingParamIndex]);
+                arg.FindPropertyRelative(nameof(PersistentArgument._index)).intValue = match;
+                
+                var from = new SerializedTypeReference(arg.FindPropertyRelative(nameof(PersistentArgument._fromType)));
+                from.SetType(exact ? type : info.ParamTypes[match]);
             }
-        }
-
-        private static string GetParamNames(MethodInfo methodInfo)
-        {
-            return $"({string.Join(", ", methodInfo.GetParameters().Select(parameter => $"{parameter.ParameterType.Name.Beautify()} {parameter.Name}"))})";
-        }
-
-        private static string Beautify(this string typeName)
-        {
-            return _builtInTypes.TryGetValue(typeName, out string builtInName) ? builtInName : typeName;
         }
     }
 }

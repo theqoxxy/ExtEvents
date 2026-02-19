@@ -4,37 +4,31 @@
     using System.Collections.Generic;
     using System.Linq;
     using System.Reflection;
-    using JetBrains.Annotations;
-    using UnityEngine;
 
     internal static class MethodInfoCache
     {
-        private static readonly Dictionary<(Type declaringType, string methodName, Type[] argTypes), MethodInfo> _cache = new Dictionary<(Type declaringType, string methodName, Type[] argTypes), MethodInfo>();
+        private static readonly Dictionary<(Type, string, Type[]), MethodInfo> _cache = new();
 
-        public static MethodInfo GetItem(Type type, string methodName, bool isStatic, Type[] argTypes)
+        public static MethodInfo GetItem(Type type, string name, bool isStatic, Type[] argTypes)
         {
-            if (_cache.TryGetValue((type, methodName, argTypes), out var value))
-                return value;
+            var key = (type, name, argTypes);
+            if (_cache.TryGetValue(key, out var cached))
+                return cached;
 
-            var flags = BindingFlags.Public | BindingFlags.NonPublic | (isStatic ? BindingFlags.Static : BindingFlags.Instance | BindingFlags.Static);
+            var flags = BindingFlags.Public | BindingFlags.NonPublic | 
+                       (isStatic ? BindingFlags.Static : BindingFlags.Instance | BindingFlags.Static);
 
-            try
-            {
-                var item = type.GetMethod(methodName, flags, null, CallingConventions.Any, argTypes, null);
-                _cache.Add((type, methodName, argTypes), item);
-                return item;
-            }
-            catch (AmbiguousMatchException)
-            {
-                var methods = type.GetMethods(flags)
-                    .Where(m => m.Name == methodName)
-                    .Where(m => ParametersMatch(m.GetParameters(), argTypes))
-                    .ToArray();
+            var method = type.GetMethod(name, flags, null, CallingConventions.Any, argTypes, null) ?? 
+                        FindMethod(type, name, flags, argTypes);
 
-                var item = methods.FirstOrDefault();
-                _cache.Add((type, methodName, argTypes), item);
-                return item;
-            }
+            _cache[key] = method;
+            return method;
+        }
+
+        private static MethodInfo FindMethod(Type type, string name, BindingFlags flags, Type[] argTypes)
+        {
+            return type.GetMethods(flags)
+                .FirstOrDefault(m => m.Name == name && ParametersMatch(m.GetParameters(), argTypes));
         }
 
         private static bool ParametersMatch(ParameterInfo[] parameters, Type[] argTypes)
@@ -43,10 +37,8 @@
                 return false;
 
             for (int i = 0; i < parameters.Length; i++)
-            {
                 if (parameters[i].ParameterType != argTypes[i])
                     return false;
-            }
 
             return true;
         }

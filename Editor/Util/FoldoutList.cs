@@ -6,301 +6,172 @@
     using UnityEditor;
     using UnityEditorInternal;
     using UnityEngine;
-    using UnityEngine.Assertions;
 
     internal class FoldoutList
     {
         private readonly ReorderableList _list;
-        private readonly SerializedProperty _elementsProperty;
+        private readonly SerializedProperty _elements;
         private readonly string _title;
+        private readonly SerializedProperty _expanded;
 
         public Action<Rect, int> DrawElementCallback;
         public Func<int, float> ElementHeightCallback;
         public Action OnAddDropdownCallback;
         public Action<Rect, FoldoutList> DrawFooterCallback;
 
+        private static readonly GUIStyle FooterBg = "RL Footer";
+        private static readonly GUIStyle FooterButton = "RL FooterButton";
+
         private static Action<ReorderableList> _clearCache;
-        private static Action<ReorderableList> ClearCache
-        {
-            get
-            {
-                if (_clearCache == null)
-                {
-                    var clearCacheMethod =
-                        typeof(ReorderableList).GetMethod("ClearCache", BindingFlags.Instance | BindingFlags.NonPublic)
-                        ?? typeof(ReorderableList).GetMethod("InvalidateCache", BindingFlags.Instance | BindingFlags.NonPublic); // the name of the method in newer Unity versions.
-
-                    Assert.IsNotNull(clearCacheMethod);
-                    // ReSharper disable once AssignNullToNotNullAttribute
-                    _clearCache = (Action<ReorderableList>) Delegate.CreateDelegate(typeof(Action<ReorderableList>), clearCacheMethod);
-                }
-
-                return _clearCache;
-            }
-        }
-
         private static Action<ReorderableList> _cacheIfNeeded;
-        private static Action<ReorderableList> CacheIfNeeded
+        private static Action<ReorderableList> _clearCacheRecursive;
+        private static FieldInfo _scheduleRemoveField;
+        private static Func<ReorderableList, bool> _isOverMax;
+
+        private static Action<ReorderableList> ClearCache => 
+            _clearCache ??= CreateDelegate<Action<ReorderableList>>("ClearCache", "InvalidateCache");
+        
+        private static Action<ReorderableList> CacheIfNeeded => 
+            _cacheIfNeeded ??= CreateDelegate<Action<ReorderableList>>("CacheIfNeeded");
+        
+        private static Func<ReorderableList, bool> IsOverMax => 
+            _isOverMax ??= CreateDelegate<Func<ReorderableList, bool>>("get_isOverMaxMultiEditLimit");
+
+        private static Action<ReorderableList> ClearCacheRecursive
         {
             get
             {
-                if (_cacheIfNeeded == null)
-                {
-                    var cachedIfNeededMethod = typeof(ReorderableList).GetMethod("CacheIfNeeded", BindingFlags.Instance | BindingFlags.NonPublic);
-                    Assert.IsNotNull(cachedIfNeededMethod);
-                    // ReSharper disable once AssignNullToNotNullAttribute
-                    _cacheIfNeeded = (Action<ReorderableList>) Delegate.CreateDelegate(typeof(Action<ReorderableList>), cachedIfNeededMethod);
-                }
-
-                return _cacheIfNeeded;
+                if (_clearCacheRecursive != null) 
+                    return _clearCacheRecursive;
+                    
+                var method = typeof(ReorderableList).GetMethod("ClearCacheRecursive", BindingFlags.Instance | BindingFlags.NonPublic) ??
+                            typeof(ReorderableList).GetMethod("InvalidateCacheRecursive", BindingFlags.Instance | BindingFlags.NonPublic);
+                _clearCacheRecursive = (Action<ReorderableList>)Delegate.CreateDelegate(typeof(Action<ReorderableList>), method);
+                return _clearCacheRecursive;
             }
         }
 
-        private static Action<ReorderableList> _clearCacheRecursive;
-        private void ClearCacheRecursive()
-        {
-            if (_clearCacheRecursive == null)
-            {
-                var clearCacheRecursive = typeof(ReorderableList).GetMethod("ClearCacheRecursive", BindingFlags.Instance | BindingFlags.NonPublic)
-                                          ?? typeof(ReorderableList).GetMethod("InvalidateCacheRecursive", BindingFlags.Instance | BindingFlags.NonPublic);
-                Assert.IsNotNull(clearCacheRecursive);
-                // ReSharper disable once AssignNullToNotNullAttribute
-                _clearCacheRecursive = (Action<ReorderableList>) Delegate.CreateDelegate(typeof(Action<ReorderableList>), clearCacheRecursive);
-            }
-
-            _clearCacheRecursive.Invoke(_list);
-        }
-
-        private static bool _triedGetScheduleRemoveField;
-        private static FieldInfo _scheduleRemove;
         private bool ScheduleRemove
         {
             get
             {
-                if (_scheduleRemove == null && !_triedGetScheduleRemoveField)
-                {
-                    _scheduleRemove = typeof(ReorderableList).GetField("scheduleRemove", BindingFlags.NonPublic | BindingFlags.Instance);
-                    _triedGetScheduleRemoveField = true;
-                }
-
-                if (_scheduleRemove == null)
-                    return true;
-
-                return (bool) _scheduleRemove.GetValue(_list);
+                if (_scheduleRemoveField == null)
+                    _scheduleRemoveField = typeof(ReorderableList).GetField("scheduleRemove", BindingFlags.NonPublic | BindingFlags.Instance);
+                return _scheduleRemoveField != null && (bool)_scheduleRemoveField.GetValue(_list);
             }
-            set
-            {
-                if (_scheduleRemove == null && !_triedGetScheduleRemoveField)
-                {
-                    _scheduleRemove = typeof(ReorderableList).GetField("scheduleRemove", BindingFlags.NonPublic | BindingFlags.Instance);
-                    _triedGetScheduleRemoveField = true;
-                }
-
-                _scheduleRemove?.SetValue(_list, value);
-            }
+            set => _scheduleRemoveField?.SetValue(_list, value);
         }
 
-        private static Func<ReorderableList, bool> _isOverMaxMultiEditLimit;
-        private static bool IsOverMaxMultiEditLimit(ReorderableList list)
+        private static T CreateDelegate<T>(string primary, string alt = null) where T : Delegate
         {
-            if (_isOverMaxMultiEditLimit == null)
-            {
-                var method = typeof(ReorderableList).GetMethod("get_isOverMaxMultiEditLimit", BindingFlags.NonPublic | BindingFlags.Instance);
-                _isOverMaxMultiEditLimit = (Func<ReorderableList, bool>) Delegate.CreateDelegate(typeof(Func<ReorderableList, bool>), method);
-            }
-
-            return _isOverMaxMultiEditLimit(list);
+            var method = typeof(ReorderableList).GetMethod(primary, BindingFlags.Instance | BindingFlags.NonPublic) ??
+                        (alt != null ? typeof(ReorderableList).GetMethod(alt, BindingFlags.Instance | BindingFlags.NonPublic) : null);
+            return (T)Delegate.CreateDelegate(typeof(T), method);
         }
 
-        /// <summary>
-        /// Creates a new instance of foldout reorderable list.
-        /// </summary>
-        /// <param name="elementsProperty">The property that represents a list of elements that will be drawn.</param>
-        /// <param name="title">A title of the list.</param>
-        /// <param name="expandedProperty">The bool serialized property that keeps a value representing the expanded state of the list.</param>
-        /// <remarks>
-        /// We use a bool SerializedProperty instead of _elementsProperty.isExpanded because we can't control which
-        /// value will be set by default to isExpanded. It's always false by default until it is set otherwise.
-        /// </remarks>
-        public FoldoutList(SerializedProperty elementsProperty, string title, SerializedProperty expandedProperty)
+        public FoldoutList(SerializedProperty elements, string title, SerializedProperty expanded)
         {
-            _elementsProperty = elementsProperty;
+            _elements = elements;
             _title = title;
-            _list = CreateReorderableList(expandedProperty);
+            _expanded = expanded;
+            _list = CreateList();
         }
 
-        private ReorderableList CreateReorderableList(SerializedProperty expandedProperty)
+        private ReorderableList CreateList() => new(_elements.serializedObject, _elements)
         {
-            return new ReorderableList(_elementsProperty.serializedObject, _elementsProperty)
+            drawHeaderCallback = rect =>
             {
-                drawHeaderCallback = rect =>
+                rect = new Rect(rect.x + 10f, rect.y, rect.width - 10f, rect.height);
+                bool was = _expanded.boolValue;
+                bool now = EditorGUI.Foldout(rect, was, _title, true);
+                if (was != now)
                 {
-                    const float leftMargin = 10f;
-                    var shiftedRight = new Rect(rect.x + leftMargin, rect.y, rect.width - leftMargin, rect.height);
-
-                    bool newValue = EditorGUI.Foldout(shiftedRight, expandedProperty.boolValue, _title, true);
-
-                    if (expandedProperty.boolValue == newValue)
-                        return;
-
-                    expandedProperty.boolValue = newValue;
-                    _list.draggable = newValue; // When the list is folded, draggable should be set to false. Otherwise, its icon will be drawn.
+                    _expanded.boolValue = now;
+                    _list.draggable = now;
                     ClearCache(_list);
-                },
-                drawElementCallback = (rect, index, _, __) =>
-                {
-                    if ( ! expandedProperty.boolValue)
-                        return;
-
-                    DrawElementCallback(rect, index);
-                },
-                elementHeightCallback = index => expandedProperty.boolValue ? ElementHeightCallback(index) : 0f,
-                onAddDropdownCallback = (_, __) => OnAddDropdownCallback(),
-                drawFooterCallback = rect =>
-                {
-                    // This will prevent add and remove buttons from being drawn when the list is folded.
-                    if ( ! expandedProperty.boolValue)
-                        return;
-
-                    if (DrawFooterCallback != null)
-                    {
-                        DrawFooterCallback.Invoke(rect, this);
-                    }
-                    else
-                    {
-                        ReorderableList.defaultBehaviours.DrawFooter(rect, _list);
-                    }
-                },
-                draggable = expandedProperty.boolValue // When the list is folded, draggable should be set to false. Otherwise, its icon will be drawn.
-            };
-        }
+                }
+            },
+            drawElementCallback = (rect, index, _, __) => { if (_expanded.boolValue) DrawElementCallback(rect, index); },
+            elementHeightCallback = index => _expanded.boolValue ? ElementHeightCallback(index) : 0f,
+            onAddDropdownCallback = (_, __) => OnAddDropdownCallback?.Invoke(),
+            drawFooterCallback = rect =>
+            {
+                if (!_expanded.boolValue) return;
+                if (DrawFooterCallback != null) DrawFooterCallback(rect, this);
+                else ReorderableList.defaultBehaviours.DrawFooter(rect, _list);
+            },
+            draggable = _expanded.boolValue
+        };
 
         public void DoList(Rect rect) => _list.DoList(rect);
-
         public float GetHeight() => _list.GetHeight();
-
         public void ResetCache()
         {
             ClearCache(_list);
             CacheIfNeeded(_list);
         }
+        private void InvalidateCache() => ClearCacheRecursive(_list);
 
-        private static readonly GUIStyle _footerBackground = "RL Footer";
-        private static readonly GUIStyle _preButton = (GUIStyle) "RL FooterButton";
-
-        public static void DrawFooter(Rect buttonsRect, FoldoutList list, params ButtonData[] buttons)
+        public static void DrawFooter(Rect rect, FoldoutList list, params ButtonData[] buttons)
         {
-            float rightBorder = buttonsRect.xMax - 10f;
-            float leftBorder = rightBorder - 8f - buttons.Sum(button => button.Size.x);
-            buttonsRect = new Rect(leftBorder, buttonsRect.y, rightBorder - leftBorder, buttonsRect.height);
+            float right = rect.xMax - 10f;
+            float left = right - 8f - buttons.Sum(b => b.Size.x);
+            rect = new Rect(left, rect.y, right - left, rect.height);
 
             if (Event.current.type == EventType.Repaint)
-                _footerBackground.Draw(buttonsRect, false, false, false, false);
+                FooterBg.Draw(rect, false, false, false, false);
 
-            leftBorder += 4f;
-
-            foreach (var button in buttons)
+            float x = left + 4f;
+            foreach (var btn in buttons)
             {
-                if (button.IsAddButton)
-                {
-                    using (new EditorGUI.DisabledScope(list._list.onCanAddCallback != null && !list._list.onCanAddCallback(list._list) || IsOverMaxMultiEditLimit(list._list)))
-                    {
-                        var buttonRect = new Rect(new Vector2(leftBorder, buttonsRect.y), button.Size);
-                        if (GUI.Button(buttonRect, button.Content, _preButton))
-                        {
-                            button.Action?.Invoke(buttonRect, list);
-                        }
-                    }
-                }
-                else
-                {
-                    using (new EditorGUI.DisabledScope(list._list.index < 0 || list._list.index >= list._list.count ||
-                                                       list._list.onCanRemoveCallback != null &&
-                                                       !list._list.onCanRemoveCallback(list._list) || IsOverMaxMultiEditLimit(list._list)))
-                    {
-                        var buttonRect = new Rect(new Vector2(leftBorder, buttonsRect.y), button.Size);
-                        if (GUI.Button(buttonRect, button.Content, _preButton) || GUI.enabled && list.ScheduleRemove)
-                        {
-                            button.Action?.Invoke(buttonRect, list);
-                        }
-                    }
-                }
+                bool disabled = btn.IsAddButton
+                    ? (list._list.onCanAddCallback != null && !list._list.onCanAddCallback(list._list)) || IsOverMax(list._list)
+                    : list._list.index < 0 || list._list.index >= list._list.count ||
+                      (list._list.onCanRemoveCallback != null && !list._list.onCanRemoveCallback(list._list)) || IsOverMax(list._list);
 
-                leftBorder += button.Size.x;
+                using (new EditorGUI.DisabledScope(disabled))
+                {
+                    var btnRect = new Rect(new Vector2(x, rect.y), btn.Size);
+                    if (GUI.Button(btnRect, btn.Content, FooterButton) || (!btn.IsAddButton && GUI.enabled && list.ScheduleRemove))
+                        btn.Action?.Invoke(btnRect, list);
+                }
+                x += btn.Size.x;
             }
-
             list.ScheduleRemove = false;
         }
 
-        private static ButtonData _defaultAddButton;
-        public static ButtonData DefaultAddButton
-        {
-            get
+        public static readonly ButtonData DefaultAddButton = new(
+            new Vector2(25f, 16f),
+            EditorGUIUtility.TrIconContent("Toolbar Plus", "Add to the list"),
+            true,
+            (rect, list) =>
             {
-                if (_defaultAddButton == null)
-                {
-                    _defaultAddButton = new ButtonData(new Vector2(25f, 16f),
-                        EditorGUIUtility.TrIconContent("Toolbar Plus", "Add to the list"),
-                        true,
-                        (rect, list) =>
-                        {
-                            if (list._list.onAddDropdownCallback != null)
-                            {
-                                list._list.onAddDropdownCallback(rect, list._list);
-                            }
-                            else if (list._list.onAddCallback != null)
-                            {
-                                list._list.onAddCallback(list._list);
-                            }
-                            else
-                            {
-                                ReorderableList.defaultBehaviours.DoAddButton(list._list);
-                            }
+                if (list._list.onAddDropdownCallback != null)
+                    list._list.onAddDropdownCallback(rect, list._list);
+                else if (list._list.onAddCallback != null)
+                    list._list.onAddCallback(list._list);
+                else
+                    ReorderableList.defaultBehaviours.DoAddButton(list._list);
 
-                            ReorderableList.ChangedCallbackDelegate onChangedCallback = list._list.onChangedCallback;
+                list._list.onChangedCallback?.Invoke(list._list);
+                list.InvalidateCache();
+            });
 
-                            onChangedCallback?.Invoke(list._list);
-
-                            list.ClearCacheRecursive();
-                        });
-                }
-
-                return _defaultAddButton;
-            }
-        }
-
-        private static ButtonData _defaultRemoveButton;
-        public static ButtonData DefaultRemoveButton
-        {
-            get
+        public static readonly ButtonData DefaultRemoveButton = new(
+            new Vector2(25f, 16f),
+            EditorGUIUtility.TrIconContent("Toolbar Minus", "Remove selection from the list"),
+            false,
+            (rect, list) =>
             {
-                if (_defaultRemoveButton == null)
-                {
-                    _defaultRemoveButton = new ButtonData(new Vector2(25f, 16f),
-                        EditorGUIUtility.TrIconContent("Toolbar Minus", "Remove selection from the list"),
-                        true,
-                        (rect, list) =>
-                        {
-                            if (list._list.onRemoveCallback == null)
-                            {
-                                if (list._list.index >= 0 && list._list.index < list._list.count)
-                                    ReorderableList.defaultBehaviours.DoRemoveButton(list._list);
-                            }
-                            else
-                            {
-                                list._list.onRemoveCallback(list._list);
-                            }
+                if (list._list.onRemoveCallback == null && list._list.index >= 0 && list._list.index < list._list.count)
+                    ReorderableList.defaultBehaviours.DoRemoveButton(list._list);
+                else
+                    list._list.onRemoveCallback?.Invoke(list._list);
 
-                            ReorderableList.ChangedCallbackDelegate onChangedCallback = list._list.onChangedCallback;
-                            onChangedCallback?.Invoke(list._list);
-                            list.ClearCacheRecursive();
-                            GUI.changed = true;
-                        });
-                }
-
-                return _defaultRemoveButton;
-            }
-        }
+                list._list.onChangedCallback?.Invoke(list._list);
+                list.InvalidateCache();
+                GUI.changed = true;
+            });
 
         public class ButtonData
         {
@@ -309,13 +180,8 @@
             public readonly Action<Rect, FoldoutList> Action;
             public readonly bool IsAddButton;
 
-            public ButtonData(Vector2 size, GUIContent content, bool isAddButton, Action<Rect, FoldoutList> action)
-            {
-                Size = size;
-                Content = content;
-                Action = action;
-                IsAddButton = isAddButton;
-            }
+            public ButtonData(Vector2 size, GUIContent content, bool isAdd, Action<Rect, FoldoutList> action)
+                => (Size, Content, IsAddButton, Action) = (size, content, isAdd, action);
         }
     }
 }
