@@ -62,7 +62,11 @@ namespace ExtEvents
         /// </summary>
         /// <param name="index">The index of a persistent listener to remove.</param>
         [PublicAPI]
-        public void RemovePersistentListenerAt(int index) => ArrayHelper.RemoveAt(ref _persistentListeners, index);
+        public void RemovePersistentListenerAt(int index)
+        {
+            ArrayHelper.RemoveAt(ref _persistentListeners, index);
+            ResetListenersState();
+        }
 
         /// <summary>
         /// Removes the specified persistent listener from the list of listeners.
@@ -70,7 +74,12 @@ namespace ExtEvents
         /// <param name="listener">The listener to remove.</param>
         /// <returns>Whether the listener was found in the list.</returns>
         [PublicAPI]
-        public bool RemovePersistentListener(PersistentListener listener) => ArrayHelper.Remove(ref _persistentListeners, listener);
+        public bool RemovePersistentListener(PersistentListener listener)
+        {
+            bool result = ArrayHelper.Remove(ref _persistentListeners, listener);
+            if (result) ResetListenersState(); // Добавить эту строку
+            return result;
+        }
 
         /// <summary>
         /// Removes all persistent listeners that invoke the specified method through a delegate.
@@ -95,24 +104,17 @@ namespace ExtEvents
         [PublicAPI]
         public int RemovePersistentListener(MethodInfo method)
         {
-            if (method == null)
-                throw new ArgumentNullException(nameof(method));
-
             int removedCount = 0;
-
             for (int i = _persistentListeners.Length - 1; i >= 0; i--)
             {
                 var listener = _persistentListeners[i];
-
-                // Проверяем, соответствует ли метод слушателя удаляемому методу
-                if (listener.MethodInfo != null &&
-                    listener.MethodInfo == method)
+                if (listener.MethodInfo != null && listener.MethodInfo == method)
                 {
                     RemovePersistentListenerAt(i);
                     removedCount++;
                 }
             }
-
+            if (removedCount > 0) ResetListenersState(); // Добавить эту строку
             return removedCount;
         }
 
@@ -154,7 +156,6 @@ namespace ExtEvents
             {
                 var listener = _persistentListeners[i];
 
-                // Проверяем, соответствует ли метод и цель слушателя
                 if (listener.MethodInfo != null &&
                     listener.MethodInfo == method &&
                     listener.Target == target)
@@ -165,6 +166,12 @@ namespace ExtEvents
             }
 
             return removedCount;
+        }
+
+        public void ResetListenersState()
+        {
+            foreach (var listener in _persistentListeners)
+                listener.ResetInitializationState();
         }
 
         private static void CheckArguments(MethodInfo method, ref PersistentArgument[] arguments, Type[] eventParamTypes)
