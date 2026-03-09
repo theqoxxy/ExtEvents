@@ -182,9 +182,8 @@ namespace ExtEvents
 
         internal unsafe void Invoke([CanBeNull] void*[] args)
         {
-            // If no function is chosen, exit without any warnings.
             if (CallState == UnityEventCallState.Off || string.IsNullOrEmpty(_methodName))
-                 return;
+                return;
 
 #if UNITY_EDITOR
             if (CallState == UnityEventCallState.RuntimeOnly && !Application.isPlaying)
@@ -203,6 +202,14 @@ namespace ExtEvents
 
             if (_initializationSuccessful)
                 InvokeImpl(args);
+        }
+
+        public unsafe void ResetInitializationState()
+        {
+            _initializationComplete = false;
+            _initializationSuccessful = false;
+            _invokableCall = null;
+            _arguments = null;
         }
 
         internal static BindingFlags GetFlags(bool isStatic) => BindingFlags.Public | BindingFlags.NonPublic | (isStatic ? BindingFlags.Static : BindingFlags.Instance | BindingFlags.Static);
